@@ -1,6 +1,9 @@
 import path from 'path';
 import dotenv from 'dotenv';
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+// Load .env only if not in production (Railway injects vars directly)
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+}
 import express from 'express';
 import cors from 'cors';
 import patientsRouter from './routes/patients';
@@ -16,11 +19,13 @@ const PORT = process.env.PORT ?? 3001;
 // ─── Middlewares ──────────────────────────────────────────────────────────────
 app.use(cors({
   origin: (origin, callback) => {
+    const clientUrl = process.env.CLIENT_URL;
     const allowed = [
-      process.env.CLIENT_URL ?? 'http://localhost:5173',
-      'http://localhost:3000',
       'http://localhost:5173',
+      'http://localhost:3000',
     ];
+    if (clientUrl) allowed.push(clientUrl);
+    
     if (!origin || allowed.includes(origin)) {
       callback(null, true);
     } else {
