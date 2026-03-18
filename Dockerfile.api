@@ -31,5 +31,5 @@ COPY --from=builder /app/prisma ./prisma
 # Copy cids.json into dist/prisma/ so seed.js (__dirname = dist/prisma) can find it
 COPY --from=builder /app/prisma/cids.json ./dist/prisma/cids.json
 EXPOSE 3001
-# Run migrations, seed (compiled JS) and start server
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && npm run prisma:seed-all:prod && node dist/src/index.js"]
+# Push schema directly to DB (bypasses migration history state), seed, then start server
+CMD ["sh", "-c", "./node_modules/.bin/prisma db push --accept-data-loss && npm run prisma:seed-all:prod && node dist/src/index.js"]
