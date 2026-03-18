@@ -20,22 +20,10 @@ const PORT = process.env.PORT ?? 3001;
 app.use(express.static(path.join(__dirname, '../../public')));
 
 // ─── Middlewares para APIs ────────────────────────────────────────────────────
+// Como front e back rodam no mesmo domínio, um CORS brando resolve e evita bloqueios
 app.use('/api', cors({
-  origin: (origin, callback) => {
-    const clientUrl = process.env.CLIENT_URL;
-    const allowed = [
-      'http://localhost:5173',
-      'http://localhost:3000',
-    ];
-    if (clientUrl) allowed.push(clientUrl);
-    
-    // Se não houver origin (mesma origem) ou estiver na lista de permitidos
-    if (!origin || allowed.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: true, // Permite que a requisição venha do próprio domínio gerado no Railway
+  credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
