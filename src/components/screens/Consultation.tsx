@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Mic, Pause, Square, Save, Download, Send, FileText, CheckCircle, ClipboardList, BrainCircuit } from 'lucide-react';
+import { ArrowLeft, Mic, Pause, Square, Save, Download, Send, FileText, CheckCircle, ClipboardList, BrainCircuit, Edit3, X } from 'lucide-react';
 import { Button } from "../ui/button";
 import { Patient } from "../../domain/patient/Patient";
 import { motion, AnimatePresence } from "motion/react";
@@ -13,6 +13,7 @@ import { cn } from "../ui/utils";
 import { consultationsApi, aiApi, patientsApi } from "../../lib/api";
 import { jsPDF } from "jspdf";
 import ReactMarkdown from "react-markdown";
+import { Textarea } from "../ui/textarea";
 
 interface ConsultationProps {
   patient: Patient;
@@ -254,6 +255,7 @@ export function Consultation({ patient, onBack }: ConsultationProps) {
                rawTranscript={rawTranscript}
                transcriptClean={transcriptClean}
                anamnesisMarkdown={anamnesisMarkdown}
+               setAnamnesisMarkdown={setAnamnesisMarkdown}
                anamnesisJson={anamnesisJson}
                patient={{ ...patient, name: currentPatientName }}
                aiAnalysis={aiAnalysis}
@@ -399,6 +401,7 @@ function ReviewView({
   rawTranscript,
   transcriptClean,
   anamnesisMarkdown,
+  setAnamnesisMarkdown,
   anamnesisJson,
   patient,
   aiAnalysis,
@@ -407,6 +410,23 @@ function ReviewView({
 }: any) {
   const [selectedExams, setSelectedExams] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("anamnese");
+  
+  // States para o Editor de Anamnese
+  const [isEditingAnamnesis, setIsEditingAnamnesis] = useState(false);
+  const [editedAnamnesis, setEditedAnamnesis] = useState(anamnesisMarkdown);
+
+  // Sincroniza o prop caso venha vazio primeiro e depois carregue
+  useEffect(() => {
+    if (!isEditingAnamnesis) {
+      setEditedAnamnesis(anamnesisMarkdown);
+    }
+  }, [anamnesisMarkdown, isEditingAnamnesis]);
+
+  const handleSaveEdit = () => {
+    setAnamnesisMarkdown(editedAnamnesis);
+    setIsEditingAnamnesis(false);
+    toast.success("Edição concluída", { description: "O texto da anamnese foi atualizado." });
+  };
 
   const safeAnalysis = aiAnalysis || {
     hypothesis: 'Aguardando análise...',
@@ -484,24 +504,51 @@ function ReviewView({
             </div>
 
             {/* Aba Anamnese: Prontuário em Markdown */}
-            <TabsContent value="anamnese" className="flex-1 overflow-y-auto m-0">
-              <div className="p-4 lg:p-6 max-w-4xl mx-auto">
-                {pendingFields.length > 0 && (
-                  <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
-                    <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-300 mb-1">⚠️ {pendingFields.length} campo(s) não abordado(s) na consulta:</p>
-                    <ul className="list-disc pl-5 space-y-0.5">
-                      {pendingFields.map((f: string, i: number) => (
-                        <li key={i} className="text-xs text-yellow-700 dark:text-yellow-400">{f}</li>
-                      ))}
-                    </ul>
+            <TabsContent value="anamnese" className="flex-1 overflow-y-auto m-0 flex flex-col">
+              <div className="p-4 lg:p-6 max-w-4xl mx-auto w-full flex-1 flex flex-col">
+                <div className="flex justify-between items-start mb-4">
+                  {pendingFields.length > 0 ? (
+                    <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg max-w-2xl">
+                      <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-300 mb-1">⚠️ {pendingFields.length} campo(s) não abordado(s) na consulta:</p>
+                      <ul className="list-disc pl-5 space-y-0.5">
+                        {pendingFields.map((f: string, i: number) => (
+                          <li key={i} className="text-xs text-yellow-700 dark:text-yellow-400">{f}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : <div />}
+                  
+                  {anamnesisMarkdown && (
+                    <Button 
+                      variant={isEditingAnamnesis ? "default" : "outline"} 
+                      size="sm" 
+                      onClick={() => isEditingAnamnesis ? handleSaveEdit() : setIsEditingAnamnesis(true)}
+                      className={cn("ml-4 shrink-0 shadow-sm", isEditingAnamnesis && "bg-emerald-600 hover:bg-emerald-700")}
+                    >
+                      {isEditingAnamnesis ? (
+                        <><CheckCircle size={16} className="mr-2" /> Concluir Edição</>
+                      ) : (
+                        <><Edit3 size={16} className="mr-2" /> Editar Anamnese</>
+                      )}
+                    </Button>
+                  )}
+                </div>
+
+                {isEditingAnamnesis ? (
+                  <div className="flex-1 flex flex-col animate-in fade-in zoom-in-95 duration-200">
+                    <Textarea 
+                      value={editedAnamnesis} 
+                      onChange={(e) => setEditedAnamnesis(e.target.value)}
+                      className="flex-1 min-h-[400px] font-mono text-sm leading-relaxed p-4 border-primary/20 focus-visible:ring-primary shadow-inner bg-muted/10"
+                      placeholder="Edite a anamnese aqui..."
+                    />
                   </div>
-                )}
-                {anamnesisMarkdown ? (
-                  <div className="prose prose-slate dark:prose-invert max-w-none text-sm">
+                ) : anamnesisMarkdown ? (
+                  <div className="prose prose-slate dark:prose-invert max-w-none text-sm animate-in fade-in duration-200 bg-card p-6 rounded-xl border border-border shadow-sm">
                     <ReactMarkdown>{anamnesisMarkdown}</ReactMarkdown>
                   </div>
                 ) : (
-                  <p className="text-muted-foreground italic">Anamnese não disponível.</p>
+                  <p className="text-muted-foreground italic text-center mt-10">Anamnese não disponível.</p>
                 )}
               </div>
             </TabsContent>
