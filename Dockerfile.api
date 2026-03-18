@@ -29,5 +29,5 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma ./prisma
 EXPOSE 3001
-# Run migrations and start server (DATABASE_URL is injected by Railway at runtime)
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && npm run prisma:seed-all && node dist/index.js"]
+# Run migrations, seed (compiled JS) and start server
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && npm run prisma:seed-all:prod && node dist/src/index.js"]

@@ -2,7 +2,7 @@
   "name": "medassist-server",
   "version": "1.0.0",
   "description": "MedAssist AI — Backend API",
-  "main": "dist/index.js",
+  "main": "dist/src/index.js",
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts",
     "build": "tsc",
@@ -14,7 +14,10 @@
     "prisma:studio": "prisma studio",
     "prisma:seed": "ts-node prisma/seed.ts",
     "prisma:seed-admin": "ts-node prisma/seedAdmin.ts",
-    "prisma:seed-all": "npm run prisma:seed && npm run prisma:seed-admin"
+    "prisma:seed-all": "npm run prisma:seed && npm run prisma:seed-admin",
+    "prisma:seed:prod": "node dist/prisma/seed.js",
+    "prisma:seed-admin:prod": "node dist/prisma/seedAdmin.js",
+    "prisma:seed-all:prod": "npm run prisma:seed:prod && npm run prisma:seed-admin:prod"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
