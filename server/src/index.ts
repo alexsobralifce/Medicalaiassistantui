@@ -67,6 +67,17 @@ app.get('*', (_req, res) => {
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`✅ MedAssist API running → http://localhost:${PORT}`);
+    try {
+      const fs = require('fs');
+      const publicPath = path.join(__dirname, '../../public');
+      console.log('__dirname is:', __dirname);
+      console.log('Contents of __dirname:', fs.readdirSync(__dirname));
+      console.log('Contents of /app:', fs.readdirSync('/app'));
+      console.log('Target publicPath:', publicPath);
+      console.log('Contents of publicPath:', fs.existsSync(publicPath) ? fs.readdirSync(publicPath) : 'DOES NOT EXIST');
+    } catch (e) {
+      console.error('Error debugging FS:', e);
+    }
   });
 }
 
