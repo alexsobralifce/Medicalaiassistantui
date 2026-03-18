@@ -1,4 +1,4 @@
-import { Patient } from "../App";
+import { Patient } from "../domain/patient/Patient";
 
 export const PATIENTS: Patient[] = [
   {

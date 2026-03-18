@@ -1,17 +1,19 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Mic, Pause, Square, Play, Check, X, FileText, Pill, Stethoscope, AlertCircle, Printer, Mail, Save, ChevronDown, Download, Send } from 'lucide-react';
+import { ArrowLeft, Mic, Pause, Square, Check, FileText, Save, Download, Send } from 'lucide-react';
 import { Button } from "../ui/button";
-import { Patient } from "../../App";
+import { Patient } from "../../domain/patient/Patient";
 import { motion, AnimatePresence } from "motion/react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { ScrollArea } from "../ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { Separator } from "../ui/separator";
+import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../ui/accordion";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { cn } from "../ui/utils";
+import { AlertBanner } from "../ui/alert-banner";
+import { consultationsApi, aiApi, patientsApi } from "../../lib/api";
+import { jsPDF } from "jspdf";
 
 interface ConsultationProps {
   patient: Patient;
@@ -20,50 +22,107 @@ interface ConsultationProps {
 
 type Mode = 'recording' | 'processing' | 'review';
 
-  const MOCK_TRANSCRIPT_CHUNKS = [
-    "Meu nome é Carlos Silva.",
-    "Relato dores de cabeça persistentes nas últimas 2 semanas.",
-    "Descrevo a dor como pulsante na região frontal.",
-    "Menciono tontura ocasional ao levantar-se rapidamente.",
-    "Sem histórico de enxaqueca na família.",
-    "Atualmente tomando analgésicos de venda livre com alívio mínimo.",
-    "Padrões de sono irregulares devido ao estresse no trabalho.",
-  ];
-
 export function Consultation({ patient, onBack }: ConsultationProps) {
   const [mode, setMode] = useState<Mode>('recording');
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState<string[]>([]);
   const [recordingTime, setRecordingTime] = useState(0);
   const [currentPatientName, setCurrentPatientName] = useState(patient.name);
+  
+  // Real Audio Recording state
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+  
+  // AI Analysis State
+  const [aiAnalysis, setAiAnalysis] = useState<any>(null);
+  const [pharmacistInsights, setPharmacistInsights] = useState<any>(null);
+  const [isPharmacistLoading, setIsPharmacistLoading] = useState(false);
 
-  // Simulate transcription
+  // Auto-fetch Pharmacist Insights on mount if we have reported issues
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    if (patient.reportedIssues && !pharmacistInsights && !isPharmacistLoading) {
+      setIsPharmacistLoading(true);
+      aiApi.pharmacist(patient.reportedIssues)
+        .then(data => setPharmacistInsights(data))
+        .catch(err => console.error("Failed to load pharmacist insights", err))
+        .finally(() => setIsPharmacistLoading(false));
+    }
+  }, [patient.reportedIssues]);
+
+  // Handle Recording Timer
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
     if (isRecording && mode === 'recording') {
       interval = setInterval(() => {
         setRecordingTime(prev => prev + 1);
-        if (Math.random() > 0.7 && transcript.length < MOCK_TRANSCRIPT_CHUNKS.length) {
-           const nextChunk = MOCK_TRANSCRIPT_CHUNKS[transcript.length];
-           setTranscript(prev => [...prev, nextChunk]);
-           
-           // Simulate extracting name
-           if (nextChunk.includes("Meu nome é")) {
-             setCurrentPatientName("Carlos Silva");
-           }
-        }
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isRecording, mode, transcript]);
+  }, [isRecording, mode]);
 
-  const handleStartRecording = () => setIsRecording(true);
-  const handlePauseRecording = () => setIsRecording(false);
+  const handleStartRecording = async () => {
+    try {
+      if (mediaRecorder && mediaRecorder.state === 'paused') {
+        mediaRecorder.resume();
+        setIsRecording(true);
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+        setMode('processing');
+        
+        try {
+          // 1. Send Audio to Whisper API
+          toast.info("Transcrevendo áudio...");
+          const { text } = await aiApi.transcribe(audioBlob);
+          setTranscript([text]); // Since it's a full block we map to array of 1, or handle split lines
+
+          // 2. Send Text to GPT for Analysis
+          toast.info("Analisando consulta médica...");
+          const analysis = await aiApi.analyze(text);
+          setAiAnalysis(analysis);
+          
+          setMode('review');
+        } catch (error: any) {
+          toast.error("Erro no processamento da IA", { description: error.message });
+          setMode('recording'); // Revert mode on error so they can try again
+        } finally {
+          // Cleanup tracks
+          stream.getTracks().forEach(track => track.stop());
+        }
+      };
+
+      setMediaRecorder(recorder);
+      setAudioChunks(chunks);
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      toast.error('Erro de permissão', { description: 'Por favor autorize o uso do microfone.' });
+      console.error(err);
+    }
+  };
+
+  const handlePauseRecording = () => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.pause();
+    }
+    setIsRecording(false);
+  };
+
   const handleStopRecording = () => {
     setIsRecording(false);
-    setMode('processing');
-    // Simulate processing time
-    setTimeout(() => setMode('review'), 3000);
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
   };
 
   return (
@@ -71,24 +130,57 @@ export function Consultation({ patient, onBack }: ConsultationProps) {
       {/* Top Bar */}
       <header className="h-16 border-b border-slate-100 flex items-center justify-between px-6 bg-white z-10">
         <div className="flex items-center space-x-4">
-          <Button variant="ghost" size="icon" onClick={onBack}>
+          <Button variant="ghost" className="hover:bg-muted gap-2 text-primary" onClick={onBack}>
             <ArrowLeft size={20} />
+            <span className="font-semibold">Voltar</span>
           </Button>
           <div className="flex items-center space-x-3">
-            <img src={patient.image} alt={currentPatientName} className="w-8 h-8 rounded-full object-cover" />
+            <div
+              style={{ backgroundColor: 'var(--color-primary-surface)', color: 'var(--color-primary)' }}
+              className="w-8 h-8 rounded-full border border-border flex items-center justify-center font-bold text-xs shrink-0"
+              title={currentPatientName}
+            >
+              {currentPatientName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
+            </div>
             <div>
-              <h2 className="font-semibold text-sm text-slate-900">{currentPatientName}</h2>
+              <h2 className="font-semibold text-sm text-foreground">{currentPatientName}</h2>
               <p className="text-xs text-slate-500">{patient.age > 0 ? `${patient.age} anos` : 'Idade não informada'} • {patient.gender}</p>
             </div>
           </div>
         </div>
         
         <div className="flex items-center space-x-3">
-          <Badge variant="outline" className="font-mono font-normal text-slate-500">
+          <Badge variant="outline" className="font-mono text-xs font-normal text-muted-foreground border-border">
             {new Date().toLocaleDateString()} • {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Badge>
-          {mode === 'review' && (
-            <Button size="sm" className="bg-[#008080] hover:bg-[#006666]" onClick={() => toast.success("Consulta salva com sucesso!")}>
+        {mode === 'review' && (
+            <Button
+              size="sm"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+              onClick={async () => {
+                try {
+                  const diagnosisString = aiAnalysis 
+                    ? `${aiAnalysis.hypothesis} (CID-10: ${aiAnalysis.cid10})` 
+                    : 'Aguardando diagnóstico automático';
+                    
+                  // Combine AI evidence with reported issues
+                  const issuesText = patient.reportedIssues ? `Problemas Relatados: ${patient.reportedIssues}\n\n` : '';
+                  const aiEvidences = aiAnalysis?.evidence_list?.join('; ') || 'Nenhuma listada.';
+                  const finalNotes = `${issuesText}Consulta gerada pelo MedAssist AI.\nEvidências: ${aiEvidences}`;
+
+                  await consultationsApi.create({
+                    patientId: patient.id,
+                    transcript,
+                    notes: finalNotes,
+                    diagnosis: diagnosisString,
+                  });
+                  toast.success('Consulta salva no prontuário!', { description: 'Vinculada ao paciente ' + patient.name });
+                  onBack();
+                } catch (err: any) {
+                  toast.error(err.message ?? 'Erro ao salvar consulta');
+                }
+              }}
+            >
                <Save size={16} className="mr-2" /> Salvar no Prontuário
             </Button>
           )}
@@ -113,7 +205,14 @@ export function Consultation({ patient, onBack }: ConsultationProps) {
             <ProcessingView key="processing" />
           )}
           {mode === 'review' && (
-            <ReviewView key="review" transcript={transcript} patient={{...patient, name: currentPatientName}} />
+            <ReviewView 
+               key="review" 
+               transcript={transcript} 
+               patient={{...patient, name: currentPatientName}} 
+               aiAnalysis={aiAnalysis} 
+               pharmacistInsights={pharmacistInsights} 
+               isPharmacistLoading={isPharmacistLoading} 
+            />
           )}
         </AnimatePresence>
       </div>
@@ -133,14 +232,14 @@ function RecordingView({ isRecording, recordingTime, transcript, onStart, onPaus
       initial={{ opacity: 0 }} 
       animate={{ opacity: 1 }} 
       exit={{ opacity: 0 }}
-      className="h-full flex flex-col items-center justify-center bg-slate-50"
+      className="h-full flex flex-col items-center justify-center bg-background"
     >
       <div className="w-full max-w-3xl px-6 flex-1 flex flex-col justify-center min-h-0 pb-32">
         <div className="text-center mb-12">
-           <h2 className="text-2xl font-bold text-slate-900 mb-2">
+           <h2 className="text-2xl font-bold text-foreground mb-2">
              {isRecording ? "Ouvindo..." : "Pronto para gravar"}
            </h2>
-           <p className="text-slate-500">
+           <p className="text-muted-foreground">
              O MedAssist está pronto para transcrever e analisar a consulta.
            </p>
         </div>
@@ -151,55 +250,55 @@ function RecordingView({ isRecording, recordingTime, transcript, onStart, onPaus
             Array.from({ length: 40 }).map((_, i) => (
               <motion.div
                 key={i}
-                className="w-1.5 bg-[#008080] rounded-full"
+                className="w-1.5 bg-primary rounded-full"
                 animate={{ height: [10, Math.random() * 60 + 10, 10] }}
                 transition={{ repeat: Infinity, duration: 0.5 + Math.random() * 0.5 }}
               />
             ))
           ) : (
-            <div className="h-1 w-full max-w-md bg-slate-200 rounded-full overflow-hidden relative">
-               {transcript.length > 0 && <div className="absolute left-0 top-0 bottom-0 bg-[#008080] w-1/3" />}
+            <div className="h-1 w-full max-w-md bg-muted rounded-full overflow-hidden relative">
+               {transcript.length > 0 && <div className="absolute left-0 top-0 bottom-0 bg-primary w-1/3" />}
             </div>
           )}
         </div>
 
         {/* Transcript Preview */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 min-h-[200px] max-h-[300px] overflow-y-auto">
+        <div className="bg-card p-6 rounded-2xl shadow-sm border border-border min-h-[200px] max-h-[300px] overflow-y-auto">
            {transcript.length === 0 ? (
-             <p className="text-slate-400 italic text-center mt-8">A transcrição aparecerá aqui em tempo real...</p>
+             <p className="text-muted-foreground italic text-center mt-8">A transcrição aparecerá aqui em tempo real...</p>
            ) : (
-             <p className="text-slate-700 leading-relaxed whitespace-pre-line">
+             <p className="text-foreground leading-relaxed whitespace-pre-line">
                {transcript.join(" ")}
-               <span className="animate-pulse inline-block w-2 h-4 bg-[#008080] ml-1 align-middle"></span>
+               <span className="animate-pulse inline-block w-2 h-4 bg-primary ml-1 align-middle"></span>
              </p>
            )}
         </div>
       </div>
 
       {/* Controls */}
-      <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-6 flex flex-col items-center shadow-lg">
-         <div className="font-mono text-2xl font-medium text-slate-700 mb-6">
+      <div className="absolute bottom-0 left-0 right-0 bg-card border-t border-border p-6 flex flex-col items-center shadow-lg">
+         <div className="font-mono text-2xl font-medium text-foreground mb-6">
            {formatTime(recordingTime)}
          </div>
          
          <div className="flex items-center space-x-6">
            {!isRecording ? (
-             <Button size="lg" onClick={onStart} className="h-16 w-16 rounded-full bg-[#008080] hover:bg-[#006666] shadow-lg shadow-teal-200 scale-100 hover:scale-105 transition-all">
+             <Button size="lg" onClick={onStart} className="h-16 w-16 rounded-full bg-primary hover:bg-primary/90 shadow-lg hover:shadow-primary/30 scale-100 hover:scale-105 transition-all text-primary-foreground">
                <Mic size={28} />
              </Button>
            ) : (
-             <Button size="lg" onClick={onPause} className="h-16 w-16 rounded-full bg-amber-500 hover:bg-amber-600 shadow-lg shadow-amber-200">
+             <Button size="lg" onClick={onPause} className="h-16 w-16 rounded-full bg-orange-500 hover:bg-orange-600 shadow-lg shadow-orange-500/20 text-white">
                <Pause size={28} />
              </Button>
            )}
            
            {(transcript.length > 0 || recordingTime > 0) && (
-             <Button size="lg" variant="destructive" onClick={onStop} className="h-16 w-16 rounded-full shadow-lg shadow-red-200">
+             <Button size="lg" variant="destructive" onClick={onStop} className="h-16 w-16 rounded-full shadow-lg">
                <Square size={24} fill="currentColor" />
              </Button>
            )}
          </div>
-         <p className="mt-4 text-xs text-slate-400 uppercase tracking-widest font-semibold">
+         <p className="mt-4 text-xs text-muted-foreground uppercase tracking-widest font-semibold">
            {isRecording ? "Gravação Ativa" : "Pausado"}
          </p>
       </div>
@@ -213,44 +312,44 @@ function ProcessingView() {
       initial={{ opacity: 0 }} 
       animate={{ opacity: 1 }} 
       exit={{ opacity: 0 }}
-      className="h-full flex flex-col items-center justify-center bg-slate-900 text-white relative overflow-hidden"
+      className="h-full flex flex-col items-center justify-center bg-background text-foreground relative overflow-hidden"
     >
       {/* Background Effects */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-teal-900/40 via-slate-900 to-slate-900" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-primary/10 via-background to-background" />
       
       <div className="z-10 flex flex-col items-center">
         <motion.div 
           animate={{ rotate: 360 }}
           transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-          className="w-32 h-32 border-t-2 border-l-2 border-[#00FFFF] rounded-full mb-8 relative flex items-center justify-center shadow-[0_0_30px_rgba(0,255,255,0.3)]"
+          className="w-32 h-32 border-t-2 border-l-2 border-primary/50 rounded-full mb-8 relative flex items-center justify-center shadow-[0_0_30px_rgba(0,128,128,0.2)] dark:shadow-[0_0_30px_rgba(0,255,255,0.1)]"
         >
-           <div className="w-24 h-24 border-r-2 border-b-2 border-teal-500 rounded-full opacity-60" />
+           <div className="w-24 h-24 border-r-2 border-b-2 border-primary rounded-full opacity-60" />
         </motion.div>
         
-        <h2 className="text-2xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-teal-400">
+        <h2 className="text-2xl font-bold mb-2 text-primary">
           Analisando Dados Clínicos
         </h2>
-        <div className="flex flex-col items-center space-y-2 text-sm text-slate-400">
+        <div className="flex flex-col items-center space-y-2 text-sm text-muted-foreground font-mono">
           <motion.span 
             initial={{ opacity: 0, y: 10 }} 
             animate={{ opacity: 1, y: 0 }} 
             transition={{ delay: 0.5 }}
           >
-            Transcrevendo áudio...
+            [1/3] Transcrevendo áudio...
           </motion.span>
           <motion.span 
             initial={{ opacity: 0, y: 10 }} 
             animate={{ opacity: 1, y: 0 }} 
             transition={{ delay: 1.5 }}
           >
-            Buscando códigos CID-10...
+            [2/3] Buscando códigos CID-10...
           </motion.span>
           <motion.span 
             initial={{ opacity: 0, y: 10 }} 
             animate={{ opacity: 1, y: 0 }} 
             transition={{ delay: 2.5 }}
           >
-            Gerando plano de tratamento...
+            [3/3] Gerando plano de tratamento...
           </motion.span>
         </div>
       </div>
@@ -258,11 +357,43 @@ function ProcessingView() {
   );
 }
 
-function ReviewView({ transcript, patient }: { transcript: string[], patient: Patient }) {
-  const [selectedExams, setSelectedExams] = useState<string>('');
+function ReviewView({ transcript, patient, aiAnalysis, pharmacistInsights, isPharmacistLoading }: { transcript: string[], patient: Patient, aiAnalysis: any, pharmacistInsights: any, isPharmacistLoading: boolean }) {
+  const [selectedExams, setSelectedExams] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("analysis");
 
   const handleGeneratePDF = (type: string) => {
+    if (type === "Pedido de Exames") {
+      if (selectedExams.length === 0) {
+         toast.error("Selecione pelo menos um exame para gerar o pedido.");
+         return;
+      }
+      const doc = new jsPDF();
+      doc.setFontSize(20);
+      doc.text("Guia de Solicitação de Exames", 20, 20);
+      
+      doc.setFontSize(12);
+      doc.text(`Paciente: ${patient.name}`, 20, 35);
+      doc.text(`Data Nascimento: ${patient.dob ? new Date(patient.dob).toLocaleDateString() : 'Não informada'}`, 20, 45);
+      doc.text(`Data da Consulta: ${new Date().toLocaleDateString()}`, 20, 55);
+      
+      doc.setFontSize(14);
+      doc.text("Exames Solicitados:", 20, 75);
+      
+      doc.setFontSize(12);
+      let y = 85;
+      selectedExams.forEach(ex => {
+        doc.text(`• ${ex}`, 25, y);
+        y += 10;
+      });
+
+      doc.text("________________________________________________", 20, y + 20);
+      doc.text("Assinatura do Médico", 20, y + 30);
+
+      doc.save(`Pedido_Exames_${patient.name.replace(/\s+/g, '_')}.pdf`);
+      toast.success("PDF de Exames gerado com sucesso!");
+      return;
+    }
+
     toast.success(`Gerando PDF do ${type}...`, {
       description: "O documento foi baixado com sucesso."
     });
@@ -275,14 +406,23 @@ function ReviewView({ transcript, patient }: { transcript: string[], patient: Pa
     window.open('https://wa.me/', '_blank');
   };
 
+  const safeAnalysis = aiAnalysis || {
+    hypothesis: 'Analisando...',
+    cid10: '...',
+    confidence: '0%',
+    differential: '...',
+    differential_cid: '...',
+    evidence_list: []
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }} 
       animate={{ opacity: 1, y: 0 }} 
-      className="h-full flex flex-col bg-slate-50 overflow-hidden"
+      className="h-full flex flex-col bg-background overflow-hidden"
     >
       {/* Mobile Tabs Header */}
-      <div className="lg:hidden bg-white border-b border-slate-200 p-2 shrink-0 z-20">
+      <div className="lg:hidden bg-card border-b border-border p-2 shrink-0 z-20">
          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
            <TabsList className="grid w-full grid-cols-2">
              <TabsTrigger value="transcript">Transcrição</TabsTrigger>
@@ -294,19 +434,19 @@ function ReviewView({ transcript, patient }: { transcript: string[], patient: Pa
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
         {/* Left Panel: Transcript */}
         <div className={cn(
-          "w-full lg:w-1/3 flex-col border-r border-slate-200 bg-white min-w-0 lg:flex",
+          "w-full lg:w-1/3 flex-col border-r border-border bg-card min-w-0 lg:flex",
           activeTab === 'transcript' ? "flex" : "hidden"
         )}>
-          <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0">
-            <h3 className="font-semibold text-slate-700 flex items-center">
-              <FileText size={18} className="mr-2 text-[#008080]" /> 
+          <div className="p-4 border-b border-border bg-muted/30 flex justify-between items-center shrink-0">
+            <h3 className="font-semibold text-foreground flex items-center">
+              <FileText size={18} className="mr-2 text-primary" /> 
               Transcrição da Consulta
             </h3>
           </div>
           <ScrollArea className="flex-1 p-4 lg:p-6">
-            <div className="prose prose-slate max-w-none pb-20 lg:pb-0">
+            <div className="prose prose-slate dark:prose-invert max-w-none pb-20 lg:pb-0">
               {transcript.map((line, i) => (
-                <p key={i} className="mb-3 text-slate-700 leading-relaxed p-2 rounded hover:bg-slate-50 transition-colors">{line}</p>
+                <p key={i} className="mb-3 text-foreground leading-relaxed p-2 rounded hover:bg-muted/50 transition-colors">{line}</p>
               ))}
             </div>
           </ScrollArea>
@@ -314,57 +454,87 @@ function ReviewView({ transcript, patient }: { transcript: string[], patient: Pa
 
         {/* Middle/Right Panel: AI Analysis & Actions */}
         <div className={cn(
-          "flex-1 flex-col bg-slate-50 h-full overflow-hidden lg:flex",
+          "flex-1 flex-col bg-background h-full overflow-hidden lg:flex",
           activeTab === 'analysis' ? "flex" : "hidden"
         )}>
            <div className="flex-1 overflow-y-auto p-4 lg:p-6">
              <div className="space-y-6 max-w-4xl mx-auto">
                
+               {/* AlertBanner 
+                 type="warning" 
+                 title="Atenção Crítica" 
+                 message="Mensagem de aviso aqui"
+                 className="mb-4"
+               /> */}
+
                {/* AI Insights Card */}
-               <Card className="border-l-4 border-l-[#008080] shadow-md">
-                 <CardHeader className="pb-2 bg-teal-50/30">
+               <Card className="border-l-4 border-l-primary shadow-md overflow-hidden bg-card">
+                 <CardHeader className="pb-2 bg-primary/5">
                    <div className="flex items-center gap-2 mb-1">
-                     <Badge variant="outline" className="bg-[#008080] text-white border-none">IA Clinical Analysis</Badge>
-                     <span className="text-xs text-slate-500">Baseado em Evidências • Atualizado hoje</span>
+                     <Badge variant="outline" className="bg-primary hover:bg-primary text-primary-foreground border-none">Analysis AI Dashboard</Badge>
+                     <span className="text-xs text-muted-foreground font-mono">Baseado em Evidências • Atualizado agora</span>
                    </div>
-                   <CardTitle className="text-xl font-bold text-slate-800">Diagnóstico Sugerido</CardTitle>
+                   <CardTitle className="text-xl font-bold text-foreground">Diagnóstico Sugerido</CardTitle>
                  </CardHeader>
                  <CardContent className="pt-4 space-y-4">
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                        <h4 className="font-semibold text-slate-700 mb-1">Hipótese Principal</h4>
-                        <p className="text-lg font-bold text-[#008080]">Cefaleia Tensional</p>
-                        <p className="text-sm text-slate-500 mt-1">CID-10: <span className="font-mono font-medium text-slate-900">G44.2</span></p>
+                      <div className="p-4 bg-muted/30 rounded-xl border border-border">
+                        <h4 className="font-semibold text-foreground mb-1">Hipótese Principal</h4>
+                        <p className="text-lg font-bold text-primary">{safeAnalysis.hypothesis}</p>
+                        <p className="text-sm text-muted-foreground mt-1">CID-10: <span className="font-mono font-medium text-foreground">{safeAnalysis.cid10}</span></p>
                         <div className="mt-3 flex items-center gap-2">
-                          <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
-                            <div className="h-full bg-green-500 w-[92%]"></div>
+                          <div className="h-2 w-full bg-border rounded-full overflow-hidden">
+                            <div className="h-full bg-status-success" style={{width: safeAnalysis.confidence.includes('%') ? safeAnalysis.confidence : '100%'}}></div>
                           </div>
-                          <span className="text-xs font-bold text-green-600">92%</span>
+                          <span className="text-xs font-bold font-mono text-status-success">{safeAnalysis.confidence}</span>
                         </div>
                       </div>
-                      <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                        <h4 className="font-semibold text-slate-700 mb-1">Diagnóstico Diferencial</h4>
-                        <p className="text-lg font-bold text-slate-600">Hipotensão Ortostática</p>
-                        <p className="text-sm text-slate-500 mt-1">CID-10: <span className="font-mono font-medium text-slate-900">I95.1</span></p>
-                        <div className="mt-3 flex items-center gap-2">
-                          <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
-                            <div className="h-full bg-amber-500 w-[65%]"></div>
-                          </div>
-                          <span className="text-xs font-bold text-amber-600">65%</span>
-                        </div>
+                      <div className="p-4 bg-muted/30 rounded-xl border border-border">
+                        <h4 className="font-semibold text-foreground mb-1">Diagnóstico Diferencial</h4>
+                        <p className="text-lg font-bold text-foreground">{safeAnalysis.differential}</p>
+                        <p className="text-sm text-muted-foreground mt-1">CID-10: <span className="font-mono font-medium text-foreground">{safeAnalysis.differential_cid}</span></p>
                       </div>
                    </div>
 
-                   <Accordion type="single" collapsible className="w-full border rounded-lg bg-white px-4">
+                   {/* Pharmacist Insights */}
+                   {pharmacistInsights && (
+                      <div className="mt-4 p-4 bg-orange-50/50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800 rounded-xl space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Badge variant="outline" className="bg-orange-500 text-white border-none">Análise Farmacêutica</Badge>
+                          <span className="text-xs text-orange-600 dark:text-orange-400 font-mono">Possíveis causas e tratamentos sugeridos</span>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                           <div>
+                             <h4 className="font-semibold text-foreground text-sm mb-2 text-orange-700 dark:text-orange-300">Causas Identificadas</h4>
+                             <ul className="list-disc pl-5 space-y-1">
+                               {pharmacistInsights.causes?.map((cause: string, i: number) => (
+                                 <li key={i} className="text-sm text-muted-foreground">{cause}</li>
+                               ))}
+                             </ul>
+                           </div>
+                           <div>
+                             <h4 className="font-semibold text-foreground text-sm mb-2 text-emerald-700 dark:text-emerald-300">Medicamentos Sugeridos</h4>
+                             <ul className="list-disc pl-5 space-y-1">
+                               {pharmacistInsights.medications?.map((med: string, i: number) => (
+                                 <li key={i} className="text-sm text-muted-foreground">{med}</li>
+                               ))}
+                             </ul>
+                           </div>
+                        </div>
+                      </div>
+                   )}
+
+                   <Accordion type="single" collapsible className="w-full border border-border rounded-lg bg-card px-4">
                       <AccordionItem value="evidence" className="border-none">
-                        <AccordionTrigger className="text-sm font-medium text-slate-600">
-                           Ver Evidências Científicas
+                        <AccordionTrigger className="text-sm font-medium text-foreground hover:no-underline">
+                           Ver Evidências Científicas Extraídas
                         </AccordionTrigger>
                         <AccordionContent>
-                          <div className="space-y-2 pt-2 text-sm text-slate-600">
-                             <p>• <strong>Sintomas Coincidentes:</strong> Dor frontal bilateral, caráter opressivo/pulsante, ausência de fotofobia severa.</p>
-                             <p>• <strong>Base Bibliográfica:</strong> <em>"Stress is a primary trigger for TTH..."</em> - J. Neurology 2023.</p>
-                             <p>• <strong>Contra-indicação de Enxaqueca:</strong> Ausência de aura e histórico familiar negativo.</p>
+                          <div className="space-y-2 pt-2 text-sm text-muted-foreground prose prose-slate dark:prose-invert">
+                             {safeAnalysis.evidence_list.map((ev: string, idx: number) => (
+                               <p key={idx}>• {ev}</p>
+                             ))}
                           </div>
                         </AccordionContent>
                       </AccordionItem>
@@ -373,58 +543,62 @@ function ReviewView({ transcript, patient }: { transcript: string[], patient: Pa
                </Card>
 
                {/* Exam Request Section */}
-               <Card className="shadow-sm">
+               <Card className="shadow-sm bg-card">
                  <CardHeader>
-                   <CardTitle className="text-lg font-semibold text-slate-800">Solicitação de Exames</CardTitle>
-                   <CardDescription>Selecione os exames recomendados para este perfil clínico</CardDescription>
+                   <CardTitle className="text-lg font-semibold text-foreground">Solicitação de Exames</CardTitle>
+                   <CardDescription>Selecione os exames recomendados pela IA para este perfil clínico</CardDescription>
                  </CardHeader>
                  <CardContent>
-                   <div className="flex flex-col md:flex-row gap-3 items-end">
-                     <div className="w-full flex-1 space-y-2">
-                       <label className="text-sm font-medium text-slate-700">Exames Disponíveis</label>
-                       <Select value={selectedExams} onValueChange={setSelectedExams}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Selecione um exame..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="hemograma">Hemograma Completo</SelectItem>
-                            <SelectItem value="tireoide">Função Tireoidiana (TSH, T4)</SelectItem>
-                            <SelectItem value="rm">Ressonância Magnética - Crânio</SelectItem>
-                            <SelectItem value="mapa">MAPA 24h (Monitorização PA)</SelectItem>
-                          </SelectContent>
-                       </Select>
+                   <div className="space-y-4">
+                     {isPharmacistLoading ? (
+                        <p className="text-sm text-muted-foreground animate-pulse">Consultando especialista de diagnósticos...</p>
+                     ) : pharmacistInsights?.exams && pharmacistInsights.exams.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {pharmacistInsights.exams.map((exam: string, idx: number) => (
+                             <label key={idx} className="flex items-center space-x-3 p-3 border border-border rounded-lg hover:bg-muted/30 cursor-pointer">
+                               <input 
+                                 type="checkbox" 
+                                 className="w-5 h-5 rounded text-primary border-border focus:ring-primary"
+                                 checked={selectedExams.includes(exam)}
+                                 onChange={(e) => {
+                                   if (e.target.checked) setSelectedExams([...selectedExams, exam]);
+                                   else setSelectedExams(selectedExams.filter(e => e !== exam));
+                                 }}
+                               />
+                               <span className="text-sm font-medium text-foreground">{exam}</span>
+                             </label>
+                          ))}
+                        </div>
+                     ) : (
+                        <p className="text-sm text-muted-foreground">Nenhuma sugestão automatica de exames.</p>
+                     )}
+                     
+                     <div className="flex justify-end pt-4">
+                       <Button 
+                         onClick={() => handleGeneratePDF("Pedido de Exames")}
+                         disabled={selectedExams.length === 0}
+                         className="w-full md:w-auto bg-primary text-primary-foreground hover:bg-primary/90"
+                       >
+                         <FileText size={18} className="mr-2" />
+                         Gerar Guia em PDF ({selectedExams.length})
+                       </Button>
                      </div>
-                     <Button 
-                       onClick={() => handleGeneratePDF("Pedido de Exames")}
-                       disabled={!selectedExams}
-                       className="w-full md:w-auto bg-slate-900 text-white hover:bg-slate-800 mt-2 md:mt-0"
-                     >
-                       <FileText size={18} className="mr-2" />
-                       Gerar Pedido
-                     </Button>
                    </div>
-                   
-                   {selectedExams && (
-                     <div className="mt-4 p-3 bg-blue-50 text-blue-700 text-sm rounded-lg flex items-center">
-                       <Check size={16} className="mr-2" />
-                       Exame selecionado: <strong className="ml-1 capitalize">{selectedExams}</strong>
-                     </div>
-                   )}
                  </CardContent>
                </Card>
 
                {/* Certificate Section */}
-               <Card className="shadow-sm">
+               <Card className="shadow-sm bg-card">
                  <CardHeader>
-                   <CardTitle className="text-lg font-semibold text-slate-800">Atestado Médico</CardTitle>
+                   <CardTitle className="text-lg font-semibold text-foreground">Atestado Médico</CardTitle>
                    <CardDescription>Gerar atestado de comparecimento ou afastamento</CardDescription>
                  </CardHeader>
                  <CardContent>
                    <div className="flex flex-col sm:flex-row gap-3">
-                     <Button variant="outline" className="flex-1 w-full border-slate-300" onClick={() => handleGeneratePDF("Atestado de Horas")}>
+                     <Button variant="outline" className="flex-1 w-full" onClick={() => handleGeneratePDF("Atestado de Horas")}>
                        Atestado de Horas (Comparecimento)
                      </Button>
-                     <Button variant="outline" className="flex-1 w-full border-slate-300" onClick={() => handleGeneratePDF("Atestado de 1 Dia")}>
+                     <Button variant="outline" className="flex-1 w-full" onClick={() => handleGeneratePDF("Atestado de 1 Dia")}>
                        Atestado de 1 Dia (Afastamento)
                      </Button>
                    </div>
@@ -435,13 +609,13 @@ function ReviewView({ transcript, patient }: { transcript: string[], patient: Pa
            </div>
 
            {/* Footer Actions */}
-           <div className="shrink-0 bg-white border-t border-slate-200 p-4 shadow-lg z-20">
+           <div className="shrink-0 bg-card border-t border-border p-4 shadow-lg z-20">
              <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-               <div className="text-sm text-slate-500 order-2 md:order-1 text-center md:text-left">
-                 <span className="font-semibold text-slate-900">Dr. Ray</span> • CRM 123456-SP
+               <div className="text-sm text-muted-foreground order-2 md:order-1 text-center md:text-left">
+                 <span className="font-semibold text-foreground">Dr. Ray</span> • CRM 123456-SP
                </div>
                <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto order-1 md:order-2">
-                  <Button variant="outline" className="w-full sm:w-auto text-slate-600 border-slate-300" onClick={() => handleGeneratePDF("Relatório Completo")}>
+                  <Button variant="outline" className="w-full sm:w-auto text-foreground border-border" onClick={() => handleGeneratePDF("Relatório Completo")}>
                     <Download size={18} className="mr-2" /> Baixar Tudo (PDF)
                   </Button>
                   <Button className="w-full sm:w-auto bg-[#25D366] hover:bg-[#128C7E] text-white border-none" onClick={handleWhatsApp}>
@@ -456,74 +630,3 @@ function ReviewView({ transcript, patient }: { transcript: string[], patient: Pa
   );
 }
 
-function SuggestionCard({ title, code, confidence, details }: any) {
-  const [status, setStatus] = useState<'pending' | 'accepted' | 'rejected'>('pending');
-
-  return (
-    <Card className={`border transition-colors ${status === 'accepted' ? 'border-teal-500 bg-teal-50/50' : status === 'rejected' ? 'border-red-200 bg-red-50/50 opacity-60' : 'border-slate-200'}`}>
-      <div className="p-3 flex items-start justify-between">
-        <div>
-          <div className="flex items-center space-x-2 mb-1">
-            <h5 className="font-semibold text-slate-900 text-sm">{title}</h5>
-            <Badge variant="secondary" className="text-[10px] h-5 px-1.5 bg-slate-100 text-slate-600 border-slate-200">{code}</Badge>
-          </div>
-          <p className="text-xs text-slate-500 mb-2">{details}</p>
-          
-          {/* Confidence Bar */}
-          <div className="flex items-center space-x-2">
-            <div className="h-1.5 w-24 bg-slate-100 rounded-full overflow-hidden">
-              <div 
-                className={`h-full rounded-full ${confidence > 80 ? 'bg-green-500' : 'bg-amber-500'}`} 
-                style={{ width: `${confidence}%` }} 
-              />
-            </div>
-            <span className="text-[10px] font-medium text-slate-400">{confidence}% Match</span>
-          </div>
-        </div>
-
-        <div className="flex flex-col space-y-1 ml-2">
-           {status === 'pending' ? (
-             <>
-               <button onClick={() => setStatus('accepted')} className="h-7 w-7 rounded-full bg-slate-100 hover:bg-teal-100 text-slate-400 hover:text-teal-600 flex items-center justify-center transition-colors">
-                 <Check size={14} />
-               </button>
-               <button onClick={() => setStatus('rejected')} className="h-7 w-7 rounded-full bg-slate-100 hover:bg-red-100 text-slate-400 hover:text-red-600 flex items-center justify-center transition-colors">
-                 <X size={14} />
-               </button>
-             </>
-           ) : status === 'accepted' ? (
-             <button onClick={() => setStatus('pending')} className="h-7 w-7 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center">
-               <Check size={14} />
-             </button>
-           ) : (
-             <button onClick={() => setStatus('pending')} className="h-7 w-7 rounded-full bg-red-100 text-red-700 flex items-center justify-center">
-               <X size={14} />
-             </button>
-           )}
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function PlanItem({ type, title, subtitle }: any) {
-  const [checked, setChecked] = useState(true);
-  
-  return (
-    <div className={`p-3 flex items-start group hover:bg-slate-50 transition-colors ${!checked && 'opacity-50'}`}>
-      <div 
-        className={`mt-0.5 h-5 w-5 rounded border flex items-center justify-center cursor-pointer transition-colors ${checked ? 'bg-[#008080] border-[#008080] text-white' : 'border-slate-300 bg-white'}`}
-        onClick={() => setChecked(!checked)}
-      >
-        {checked && <Check size={12} strokeWidth={3} />}
-      </div>
-      <div className="ml-3 flex-1">
-        <p className={`text-sm font-medium ${checked ? 'text-slate-800' : 'text-slate-400 line-through'}`}>{title}</p>
-        {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
-      </div>
-      <Badge variant="outline" className="ml-2 text-[10px] text-slate-400 border-slate-200 bg-white">
-        {type}
-      </Badge>
-    </div>
-  );
-}

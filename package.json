@@ -37,6 +37,7 @@
     "embla-carousel-react": "^8.6.0",
     "hono": "*",
     "input-otp": "^1.4.2",
+    "jspdf": "^4.2.0",
     "lucide-react": "^0.487.0",
     "motion": "*",
     "next-themes": "^0.4.6",
@@ -51,12 +52,35 @@
     "vaul": "^1.1.2"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^20.10.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react-swc": "^3.10.2",
-    "vite": "6.3.5"
+    "@vitest/coverage-v8": "^4.1.0",
+    "concurrently": "^9.2.1",
+    "jsdom": "^28.1.0",
+    "tailwindcss": "^4.2.1",
+    "vite": "6.3.5",
+    "vitest": "^4.1.0"
   },
   "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "server:install": "cd server && npm install",
+    "server:dev": "cd server && npm run dev",
+    "server:migrate": "cd server && npm run prisma:migrate",
+    "server:studio": "cd server && npm run prisma:studio",
+    "dev:full": "concurrently --names \"FRONT,API\" --prefix-colors \"cyan,magenta\" \"npm run dev\" \"npm run server:dev\"",
+    "dev:clean": "concurrently --names \"FRONT,API\" --prefix-colors \"cyan,magenta\" \"npm run dev -- --force\" \"npm run server:dev\"",
+    "db:up": "docker-compose up -d",
+    "db:down": "docker-compose down",
+    "db:logs": "docker-compose logs -f"
   }
 }

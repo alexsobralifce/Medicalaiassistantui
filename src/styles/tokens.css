@@ -1,0 +1,180 @@
+@theme {
+  --font-sans: 'DM Sans', var(--default-font-family);
+  --font-mono: 'JetBrains Mono', var(--default-mono-font-family);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-ring: var(--ring);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  /* Primary Palette (Medical Blue) */
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  /* Secondary */
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  /* Destructive */
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  /* Muted */
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  /* Accent */
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  /* Popover */
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  /* Card */
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  /* Chart */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Medical Semantic Colors */
+  --color-status-normal: var(--status-normal);
+  --color-status-normal-bg: var(--status-normal-bg);
+  --color-status-warning: var(--status-warning);
+  --color-status-warning-bg: var(--status-warning-bg);
+  --color-status-critical: var(--status-critical);
+  --color-status-critical-bg: var(--status-critical-bg);
+  --color-status-info: var(--status-info);
+  --color-status-info-bg: var(--status-info-bg);
+
+  /* Sidebar */
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-sidebar-fg: var(--sidebar-fg);
+  --color-sidebar-accent: var(--sidebar-accent);
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  :root {
+    --background: var(--color-surface-alt);
+    --foreground: var(--color-on-surface);
+
+    --card: var(--color-surface);
+    --card-foreground: var(--color-on-surface);
+
+    --popover: var(--color-surface);
+    --popover-foreground: var(--color-on-surface);
+
+    /* Professional Accent mapped to Primary Brand */
+    --primary: var(--color-primary);
+    --primary-foreground: var(--color-on-primary);
+
+    --secondary: var(--color-surface-alt);
+    --secondary-foreground: var(--color-on-surface);
+
+    --muted: #f3f4f6;            /* Gray 100 */
+    --muted-foreground: var(--color-muted);
+
+    --accent: var(--color-primary-surface);
+    --accent-foreground: var(--color-primary-light);
+
+    --destructive: var(--color-critical);
+    --destructive-foreground: #ffffff;
+
+    --border: var(--color-border);
+    --input: var(--color-border);
+    --input-background: var(--color-surface-alt);
+    --ring: var(--color-primary);
+
+    /* Chart colors */
+    --chart-1: oklch(0.646 0.222 41.116);
+    --chart-2: oklch(0.6 0.118 184.704);
+    --chart-3: oklch(0.398 0.07 227.392);
+    --chart-4: oklch(0.828 0.189 84.429);
+    --chart-5: oklch(0.769 0.188 70.08);
+
+    /* Sidebar */
+    --sidebar-bg: #ffffff;
+    --sidebar-fg: #0f172a;
+    --sidebar-accent: #f1f5f9;
+
+    /* Medical Status Colors */
+    --status-normal: #22c55e;    /* Green 500 */
+    --status-normal-bg: #f0fdf4; /* Green 50 */
+    --status-warning: #f59e0b;   /* Amber 500 */
+    --status-warning-bg: #fffbeb; /* Amber 50 */
+    --status-critical: #ef4444;  /* Red 500 */
+    --status-critical-bg: #fef2f2; /* Red 50 */
+    --status-info: #3b82f6;      /* Blue 500 */
+    --status-info-bg: #eff6ff;   /* Blue 50 */
+
+    --radius: 0.5rem;
+    --font-weight-medium: 500;
+    --font-weight-normal: 400;
+  }
+
+  .dark {
+    --background: var(--color-surface-alt);
+    --foreground: var(--color-on-surface);
+
+    --card: var(--color-surface);
+    --card-foreground: var(--color-on-surface);
+
+    --popover: var(--color-surface);
+    --popover-foreground: var(--color-on-surface);
+
+    /* Professional Dark Mode Primary */
+    --primary: var(--color-primary);
+    --primary-foreground: #ffffff;
+
+    --secondary: #1F2937;        /* Gray 800 */
+    --secondary-foreground: var(--color-on-surface);
+
+    --muted: #374151;            /* Gray 700 */
+    --muted-foreground: var(--color-muted);
+
+    --accent: #450a0a;           /* Dark red 950 */
+    --accent-foreground: var(--color-primary-light);
+
+    --destructive: var(--color-critical);
+    --destructive-foreground: #fca5a5;
+
+    --border: var(--color-border);
+    --input: #1f2937;            /* Gray 800 for inputs in dark mode */
+    --input-background: #111827; /* Gray 900 */
+    --ring: var(--color-primary);
+
+    /* Chart colors */
+    --chart-1: oklch(0.488 0.243 264.376);
+    --chart-2: oklch(0.696 0.17 162.48);
+    --chart-3: oklch(0.769 0.188 70.08);
+    --chart-4: oklch(0.627 0.265 303.9);
+    --chart-5: oklch(0.645 0.246 16.439);
+
+    /* Sidebar */
+    --sidebar-bg: #020617;
+    --sidebar-fg: #f8fafc;
+    --sidebar-accent: #1e293b;
+
+    /* Medical Status Colors (dark) */
+    --status-normal: #4ade80;    /* Green 400 */
+    --status-normal-bg: #052e16; /* Green 950 */
+    --status-warning: #fbbf24;   /* Amber 400 */
+    --status-warning-bg: #431407; /* Amber 950 */
+    --status-critical: #f87171;  /* Red 400 */
+    --status-critical-bg: #450a0a; /* Red 950 */
+    --status-info: #60a5fa;      /* Blue 400 */
+    --status-info-bg: #172554;   /* Blue 950 */
+  }
+}

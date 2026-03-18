@@ -1,118 +1,67 @@
-import { LayoutDashboard, LogOut, Settings, Users, Activity, Menu } from "lucide-react";
+import { LayoutDashboard, LogOut, Settings, Users, BookOpen, ShieldAlert, Activity } from "lucide-react";
 import { cn } from "../ui/utils";
 import { Screen } from "../../App";
-import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "../ui/sheet";
-import { Button } from "../ui/button";
-import { useState } from "react";
-import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
+import { AuthenticatedUser } from "../../lib/api";
+import { ThemeToggle } from "../ui/theme-toggle";
 
 interface SidebarProps {
   onLogout: () => void;
   activeScreen: Screen;
   onNavigate: (screen: Screen) => void;
+  currentUser: AuthenticatedUser;
 }
 
-export function Sidebar({ onLogout, activeScreen, onNavigate }: SidebarProps) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  const handleNavigate = (screen: Screen) => {
-    onNavigate(screen);
-    setIsOpen(false);
-  };
-
+export function Sidebar({ onLogout, activeScreen, onNavigate, currentUser }: SidebarProps) {
+  // O Header Topo (Brand) só aparece na Sidebar para Tablet/Desktop 
+  // no Mobile, a Sidebar vira a Bottom Nav e perde o título
+  
   return (
-    <>
-      {/* Mobile Header */}
-      <div className="lg:hidden bg-[#008080] text-white p-4 flex items-center justify-start shadow-md shrink-0 z-20 gap-3">
-        <Sheet open={isOpen} onOpenChange={setIsOpen}>
-          <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
-              <Menu size={24} />
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="left" className="p-0 w-72 border-r-0 bg-[#008080] text-white border-none">
-            <VisuallyHidden>
-              <SheetTitle>Navigation Menu</SheetTitle>
-              <SheetDescription>Main navigation for mobile devices</SheetDescription>
-            </VisuallyHidden>
-            <SidebarContent 
-              onLogout={onLogout} 
-              activeScreen={activeScreen} 
-              onNavigate={handleNavigate} 
-              isMobile={true}
-            />
-          </SheetContent>
-        </Sheet>
-
-        <div className="flex items-center">
-          <div className="bg-white/20 p-1.5 rounded-lg backdrop-blur-sm mr-3">
-            <Activity className="h-6 w-6 text-white" />
-          </div>
-          <span className="text-lg font-bold tracking-tight">MedAssist AI</span>
+    <aside className="
+      z-50 bg-surface border-border flex
+      /* MOBILE: Bottom Navigation Bar */
+      flex-row items-center justify-around border-t w-full h-16
+      /* TABLET/DESKTOP: Sidebar fixada na Esquerda (grid-area) */
+      md:flex-col md:h-full md:border-t-0 md:border-r md:py-6 md:justify-start overflow-y-auto overflow-x-hidden
+    ">
+      
+      {/* Brand - Hide Mobile */}
+      <div className="hidden md:flex items-center justify-center lg:justify-start px-4 mb-8">
+        <div className="bg-primary/10 p-2 rounded-lg shrink-0">
+          <Activity className="h-7 w-7 text-primary" />
         </div>
+        <span className="ml-3 text-xl font-bold tracking-tight text-primary hidden lg:block">MedAssist</span>
       </div>
 
-      {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex w-64 bg-[#008080] text-white flex-col py-6 transition-all duration-300 shadow-xl z-10 h-full">
-        <SidebarContent 
-          onLogout={onLogout} 
-          activeScreen={activeScreen} 
-          onNavigate={onNavigate} 
-          isMobile={false}
-        />
-      </aside>
-    </>
-  );
-}
-
-interface SidebarContentProps {
-  onLogout: () => void;
-  activeScreen: Screen;
-  onNavigate: (screen: Screen) => void;
-  isMobile: boolean;
-}
-
-function SidebarContent({ onLogout, activeScreen, onNavigate, isMobile }: SidebarContentProps) {
-  return (
-    <div className="flex flex-col h-full">
-      <div className={cn("flex items-center justify-start px-6 mb-10", isMobile ? "mt-6" : "")}>
-        <div className="bg-white/20 p-2 rounded-lg backdrop-blur-sm">
-          <Activity className="h-8 w-8 text-white" />
-        </div>
-        <span className="ml-3 text-xl font-bold tracking-tight">MedAssist AI</span>
-      </div>
-
-      <nav className="flex-1 px-2 space-y-2">
-        <SidebarItem 
-          icon={<LayoutDashboard size={22} />} 
-          label="Painel" 
-          isActive={activeScreen === 'dashboard'} 
-          onClick={() => onNavigate('dashboard')}
-        />
-        <SidebarItem 
-          icon={<Users size={22} />} 
-          label="Pacientes" 
-          isActive={false} 
-          onClick={() => {}}
-        />
-        <SidebarItem 
-          icon={<Settings size={22} />} 
-          label="Configurações" 
-          isActive={false} 
-          onClick={() => {}}
-        />
+      <nav className="flex flex-row md:flex-col items-center md:items-stretch justify-around md:justify-start w-full md:flex-1 md:px-3 space-x-1 md:space-x-0 md:space-y-2">
+        <SidebarItem icon={<LayoutDashboard size={24} />} label="Painel" isActive={activeScreen === 'dashboard'} onClick={() => onNavigate('dashboard')} />
+        <SidebarItem icon={<Users size={24} />} label="Pacientes" isActive={activeScreen === 'patients'} onClick={() => onNavigate('patients')} />
+        <SidebarItem icon={<BookOpen size={24} />} label="CIDs" isActive={activeScreen === 'cids'} onClick={() => onNavigate('cids')} />
+        
+        <div className="hidden md:block w-full h-px bg-border my-4" />
+        
+        <SidebarItem icon={<Settings size={24} />} label="Ajustes" isActive={activeScreen === 'settings'} onClick={() => onNavigate('settings')} />
+        
+        {currentUser.role === 'ADMIN' && (
+          <SidebarItem icon={<ShieldAlert size={24} />} label="Contas" isActive={activeScreen === 'admin'} onClick={() => onNavigate('admin')} />
+        )}
       </nav>
 
-      <div className="px-2 pb-4">
+      {/* Footer Controls - Hide Mobile */}
+      <div className="hidden md:block px-3 mt-auto space-y-2 pt-4 border-t border-border">
+        <div className="flex items-center justify-center lg:justify-start px-3 mb-4">
+           <ThemeToggle />
+           <span className="ml-3 font-medium text-sm text-muted hidden lg:block">Tema</span>
+        </div>
         <button 
           onClick={onLogout}
-          className="flex items-center justify-start w-full p-3 text-white/80 hover:bg-white/10 rounded-xl transition-colors"
+          className="flex items-center justify-center lg:justify-start w-full p-3 text-on-surface hover:bg-surface-alt rounded-xl transition-colors shrink-0 group"
+          title="Sair"
         >
-          <LogOut size={20} />
-          <span className="ml-3 font-medium">Sair</span>
+          <LogOut size={22} className="shrink-0 text-muted group-hover:text-critical transition-colors" />
+          <span className="ml-3 font-medium hidden lg:block group-hover:text-critical transition-colors">Sair</span>
         </button>
       </div>
-    </div>
+    </aside>
   );
 }
 
@@ -121,14 +70,22 @@ function SidebarItem({ icon, label, isActive, onClick }: { icon: React.ReactNode
     <button
       onClick={onClick}
       className={cn(
-        "flex items-center justify-start w-full p-3 px-4 rounded-xl transition-all duration-200 group",
+        "flex flex-col md:flex-row items-center justify-center lg:justify-start p-2 md:p-3 rounded-xl transition-all duration-200 shrink-0 interactive",
         isActive 
-          ? "bg-white text-[#008080] shadow-md" 
-          : "text-white/80 hover:bg-white/10 hover:text-white"
+          ? "text-primary md:bg-primary/10" 
+          : "text-muted hover:bg-surface-alt hover:text-on-surface"
       )}
+      title={label}
     >
-      {icon}
-      <span className={cn("ml-3 font-medium", isActive ? "font-semibold" : "")}>
+      <div className={cn("shrink-0 flex items-center justify-center w-6 md:w-8 transition-transform", isActive ? "scale-110" : "")}>
+        {icon}
+      </div>
+      {/* Texto no Mobile (Bem pequeno embaixo) */}
+      <span className={cn("text-[10px] mt-1 md:hidden font-medium", isActive ? "font-bold text-primary" : "")}>
+         {label}
+      </span>
+      {/* Texto no Desktop (Maior ao lado) */}
+      <span className={cn("ml-3 text-sm font-medium truncate hidden lg:block", isActive ? "font-bold" : "")}>
         {label}
       </span>
     </button>
