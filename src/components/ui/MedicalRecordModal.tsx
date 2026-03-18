@@ -6,9 +6,10 @@ import { Textarea } from "./textarea";
 import { Label } from "./label";
 import { consultationsApi, ConsultationData } from "../../lib/api";
 import { Patient } from "../../domain/patient/Patient";
-import { Trash2, Edit, Save, X, Activity, AlertCircle, Loader2 } from "lucide-react";
+import { Trash2, Edit, Save, X, Activity, AlertCircle, Loader2, CheckCircle, FileText } from "lucide-react";
 import { CidSearchMenu } from "./CidSearchMenu";
 import { toast } from "sonner";
+import ReactMarkdown from "react-markdown";
 
 interface MedicalRecordModalProps {
   patient: Patient | null;
@@ -22,7 +23,7 @@ export function MedicalRecordModal({ patient, isOpen, onClose }: MedicalRecordMo
   
   // Edit State
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editNotes, setEditNotes] = useState("");
+  const [editAnamnesis, setEditAnamnesis] = useState("");
   const [editDiagnosis, setEditDiagnosis] = useState("");
 
   useEffect(() => {
@@ -46,20 +47,21 @@ export function MedicalRecordModal({ patient, isOpen, onClose }: MedicalRecordMo
 
   const handleEditClick = (cons: ConsultationData) => {
     setEditingId(cons.id);
-    setEditNotes(cons.notes || "");
+    setEditAnamnesis(cons.anamnesisMarkdown || cons.notes || "");
     setEditDiagnosis(cons.diagnosis || "");
   };
 
   const handleCancelEdit = () => {
     setEditingId(null);
-    setEditNotes("");
+    setEditAnamnesis("");
     setEditDiagnosis("");
   };
 
   const handleSaveEdit = async (id: string) => {
     try {
       await consultationsApi.update(id, {
-        notes: editNotes,
+        anamnesisMarkdown: editAnamnesis,
+        notes: editAnamnesis, // save in both just in case
         diagnosis: editDiagnosis
       });
       toast.success("Consulta atualizada!");
@@ -111,10 +113,19 @@ export function MedicalRecordModal({ patient, isOpen, onClose }: MedicalRecordMo
               {consultations.map((cons) => (
                 <div key={cons.id} className="bg-card border border-border rounded-xl shadow-sm overflow-hidden transition-all hover:shadow-md">
                   <div className="bg-muted/30 px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="font-semibold text-foreground flex items-center gap-2">
+                    <div className="font-semibold text-foreground flex items-center gap-3">
                        <span className="bg-primary/10 text-primary px-2 py-1 rounded text-xs font-mono uppercase">
                          {new Date(cons.createdAt).toLocaleDateString('pt-BR')} 
                        </span>
+                       {cons.status === 'COMPLETED' ? (
+                         <span className="flex items-center text-xs font-medium text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full border border-emerald-200">
+                           <CheckCircle size={12} className="mr-1" /> Assinado
+                         </span>
+                       ) : (
+                         <span className="flex items-center text-xs font-medium text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded-full border border-amber-200">
+                           <FileText size={12} className="mr-1" /> Rascunho
+                         </span>
+                       )}
                     </div>
                     
                     {editingId !== cons.id ? (
@@ -159,12 +170,13 @@ export function MedicalRecordModal({ patient, isOpen, onClose }: MedicalRecordMo
                         </div>
 
                         <div>
-                          <Label className="mb-2 block text-foreground">Notas Médicas / Evolução</Label>
+                          <Label className="mb-2 block text-foreground">Prontuário / Anamnese</Label>
                           <Textarea 
-                            rows={6} 
-                            value={editNotes} 
-                            onChange={e => setEditNotes(e.target.value)}
-                            className="resize-none font-mono text-sm bg-background leading-relaxed"
+                            rows={12} 
+                            value={editAnamnesis} 
+                            onChange={e => setEditAnamnesis(e.target.value)}
+                            className="resize-none font-mono text-sm bg-background leading-relaxed h-full min-h-[300px]"
+                            placeholder="Edite a anamnese (suporta Markdown)..."
                           />
                         </div>
                       </div>
@@ -178,9 +190,15 @@ export function MedicalRecordModal({ patient, isOpen, onClose }: MedicalRecordMo
                         </div>
                         
                         <div>
-                           <h4 className="text-xs uppercase font-bold text-muted-foreground tracking-wider mb-2">Notas Clínicas & Evidências</h4>
-                           <div className="bg-background text-sm text-foreground/90 p-4 rounded-lg border border-border whitespace-pre-wrap leading-relaxed">
-                              {cons.notes ? cons.notes : <span className="italic opacity-50">Nenhuma nota registrada nesta consulta.</span>}
+                           <h4 className="text-xs uppercase font-bold text-muted-foreground tracking-wider mb-2">Prontuário Clínico</h4>
+                           <div className="bg-background text-sm text-foreground/90 p-5 pl-6 rounded-lg border border-border leading-relaxed prose prose-slate dark:prose-invert max-w-none">
+                              {cons.anamnesisMarkdown ? (
+                                <ReactMarkdown>{cons.anamnesisMarkdown}</ReactMarkdown>
+                              ) : cons.notes ? (
+                                <span className="whitespace-pre-wrap">{cons.notes}</span>
+                              ) : (
+                                <span className="italic opacity-50 block mt-2 text-center text-muted-foreground">O prontuário está vazio.</span>
+                              )}
                            </div>
                         </div>
 
