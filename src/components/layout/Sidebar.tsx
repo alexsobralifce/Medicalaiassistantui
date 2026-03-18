@@ -44,6 +44,11 @@ export function Sidebar({ onLogout, activeScreen, onNavigate, currentUser }: Sid
         {currentUser.role === 'ADMIN' && (
           <SidebarItem icon={<ShieldAlert size={24} />} label="Contas" isActive={activeScreen === 'admin'} onClick={() => onNavigate('admin')} />
         )}
+
+        {/* Botão de Sair apenas para Mobile (Fica na barra principal inferior) */}
+        <div className="md:hidden">
+          <SidebarItem icon={<LogOut size={24} className="text-critical" />} label="Sair" isActive={false} onClick={onLogout} />
+        </div>
       </nav>
 
       {/* Footer Controls - Hide Mobile */}

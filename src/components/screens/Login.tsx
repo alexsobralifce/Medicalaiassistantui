@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Activity, Mail, Lock, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Activity, Mail, Lock, Loader2, Download, Smartphone } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -13,6 +13,33 @@ interface LoginProps {
 export function Login({ onLogin, isLoading = false }: LoginProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isIOS, setIsIOS] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    
+    // Check iOS
+    const checkIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    setIsIOS(checkIOS);
+
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallClick = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choiceResult: any) => {
+        if (choiceResult.outcome === 'accepted') {
+          setDeferredPrompt(null);
+        }
+      });
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,9 +125,35 @@ export function Login({ onLogin, isLoading = false }: LoginProps) {
         </div>
 
         {/* Footer info */}
-        <p className="text-center text-sm text-muted-foreground">
-          Primeiro acesso? Mande uma mensagem para o <a href="#" className="text-primary hover:underline font-medium">Administrador</a> para receber seu login.
-        </p>
+        <div className="space-y-4 text-center text-sm text-muted-foreground">
+          <p>
+            Primeiro acesso? Mande uma mensagem para o <a href="#" className="text-primary hover:underline font-medium">Administrador</a> para receber seu login.
+          </p>
+
+          {/* PWA Pointers */}
+          <div className="pt-4 border-t border-border/50 flex flex-col items-center gap-3">
+            {(deferredPrompt || isIOS) && (
+              <div className="bg-primary/5 border border-primary/20 text-primary-foreground/80 rounded-xl p-4 text-xs w-full text-center">
+                <Smartphone className="w-5 h-5 mx-auto mb-2 text-primary" />
+                <p className="mb-2 text-foreground font-medium">Use o MedAssist como aplicativo!</p>
+                {deferredPrompt ? (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="w-full mt-1 border-primary text-primary hover:bg-primary/10"
+                    onClick={handleInstallClick}
+                  >
+                    <Download className="w-4 h-4 mr-2" /> Instalar App
+                  </Button>
+                ) : isIOS ? (
+                  <p className="text-muted-foreground px-2">
+                    No Safari (iPhone), toque no ícone <b>Compartilhar</b> <span className="inline-block text-[10px] border px-1 rounded mx-1">↑</span> e depois <b>Adicionar à Tela de Início</b>.
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
