@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { requireAuth, AuthRequest } from '../middlewares/authMiddleware';
 
 const router = Router();
 
@@ -51,7 +52,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 // POST /api/v1/consultations
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { patientId, transcript, notes, diagnosis } = req.body;
+    const { patientId, transcript, transcriptClean, anamnesisJson, anamnesisMarkdown, notes, diagnosis } = req.body;
     if (!patientId) {
       return res.status(400).json({ error: 'patientId é obrigatório' });
     }
@@ -59,6 +60,9 @@ router.post('/', async (req: Request, res: Response) => {
       data: {
         patientId,
         transcript: transcript ?? [],
+        transcriptClean,
+        anamnesisJson,
+        anamnesisMarkdown,
         notes,
         diagnosis,
       },
@@ -74,14 +78,38 @@ router.post('/', async (req: Request, res: Response) => {
 // PATCH /api/v1/consultations/:id
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
+    const allowed = ['transcript', 'transcriptClean', 'anamnesisJson', 'anamnesisMarkdown', 'notes', 'diagnosis', 'status'];
+    const data: any = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) data[key] = req.body[key];
+    }
     const consultation = await prisma.consultation.update({
       where: { id: req.params.id },
-      data: req.body,
+      data,
     });
     res.json(consultation);
   } catch (error) {
     console.error('[consultations:update]', error);
     res.status(500).json({ error: 'Erro ao atualizar consulta' });
+  }
+});
+
+// POST /api/v1/consultations/:id/sign — Assinatura digital do médico
+router.post('/:id/sign', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const doctorId = req.user?.userId;
+    const consultation = await prisma.consultation.update({
+      where: { id: req.params.id },
+      data: {
+        signedAt: new Date(),
+        signedByDoctorId: doctorId,
+        status: 'COMPLETED',
+      },
+    });
+    res.json(consultation);
+  } catch (error) {
+    console.error('[consultations:sign]', error);
+    res.status(500).json({ error: 'Erro ao assinar consulta' });
   }
 });
 

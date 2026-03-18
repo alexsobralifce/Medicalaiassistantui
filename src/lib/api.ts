@@ -59,9 +59,14 @@ export interface ConsultationData {
   id: string;
   patientId: string;
   transcript: string[];
+  transcriptClean?: string;
+  anamnesisJson?: Record<string, any>;
+  anamnesisMarkdown?: string;
   notes?: string;
   diagnosis?: string;
   status: 'DRAFT' | 'REVIEW' | 'COMPLETED';
+  signedAt?: string;
+  signedByDoctorId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -90,6 +95,9 @@ export const consultationsApi = {
 
   remove: (id: string): Promise<void> =>
     fetcher<void>(`/consultations/${id}`, { method: 'DELETE' }),
+
+  sign: (id: string): Promise<ConsultationData> =>
+    fetcher<ConsultationData>(`/consultations/${id}/sign`, { method: 'POST' }),
 };
 
 // ─── AI Integration ──────────────────────────────────────────────────────────
@@ -123,6 +131,16 @@ export const aiApi = {
     fetcher<any>('/ai/analyze', {
       method: 'POST',
       body: JSON.stringify({ transcript }),
+    }),
+
+  anamnese: (transcricao_bruta: string): Promise<{
+    transcricao_limpa: string;
+    anamnesis_json: Record<string, any>;
+    anamnesis_markdown: string;
+  }> =>
+    fetcher('/ai/anamnese', {
+      method: 'POST',
+      body: JSON.stringify({ transcricao_bruta }),
     }),
 
   pharmacist: (reportedIssues: string): Promise<any> =>

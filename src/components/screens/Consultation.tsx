@@ -1,19 +1,18 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Mic, Pause, Square, Check, FileText, Save, Download, Send } from 'lucide-react';
+import { ArrowLeft, Mic, Pause, Square, Save, Download, Send, FileText, CheckCircle, ClipboardList, BrainCircuit } from 'lucide-react';
 import { Button } from "../ui/button";
 import { Patient } from "../../domain/patient/Patient";
 import { motion, AnimatePresence } from "motion/react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { ScrollArea } from "../ui/scroll-area";
-import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../ui/accordion";
 import { toast } from "sonner";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { cn } from "../ui/utils";
-import { AlertBanner } from "../ui/alert-banner";
 import { consultationsApi, aiApi, patientsApi } from "../../lib/api";
 import { jsPDF } from "jspdf";
+import ReactMarkdown from "react-markdown";
 
 interface ConsultationProps {
   patient: Patient;
@@ -25,18 +24,24 @@ type Mode = 'recording' | 'processing' | 'review';
 export function Consultation({ patient, onBack }: ConsultationProps) {
   const [mode, setMode] = useState<Mode>('recording');
   const [isRecording, setIsRecording] = useState(false);
-  const [transcript, setTranscript] = useState<string[]>([]);
+  const [rawTranscript, setRawTranscript] = useState('');
   const [recordingTime, setRecordingTime] = useState(0);
   const [currentPatientName, setCurrentPatientName] = useState(patient.name);
   
   // Real Audio Recording state
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
   
-  // AI Analysis State
+  // Anamnese pipeline state
+  const [transcriptClean, setTranscriptClean] = useState('');
+  const [anamnesisJson, setAnamnesisJson] = useState<any>(null);
+  const [anamnesisMarkdown, setAnamnesisMarkdown] = useState('');
+
+  // AI Analysis State (legacy: hypothesis/diagnosis)
   const [aiAnalysis, setAiAnalysis] = useState<any>(null);
   const [pharmacistInsights, setPharmacistInsights] = useState<any>(null);
   const [isPharmacistLoading, setIsPharmacistLoading] = useState(false);
+  const [isSigning, setIsSigning] = useState(false);
+  const [savedConsultationId, setSavedConsultationId] = useState<string | null>(null);
 
   // Auto-fetch Pharmacist Insights on mount if we have reported issues
   useEffect(() => {
@@ -81,28 +86,32 @@ export function Consultation({ patient, onBack }: ConsultationProps) {
         setMode('processing');
         
         try {
-          // 1. Send Audio to Whisper API
+          // 1. Transcrever áudio com Whisper
           toast.info("Transcrevendo áudio...");
           const { text } = await aiApi.transcribe(audioBlob);
-          setTranscript([text]); // Since it's a full block we map to array of 1, or handle split lines
+          setRawTranscript(text);
 
-          // 2. Send Text to GPT for Analysis
-          toast.info("Analisando consulta médica...");
-          const analysis = await aiApi.analyze(text);
+          // 2. Pipeline completo de anamnese (3 prompts)
+          toast.info("Estruturando anamnese clínica...");
+          const { transcricao_limpa, anamnesis_json, anamnesis_markdown } = await aiApi.anamnese(text);
+          setTranscriptClean(transcricao_limpa);
+          setAnamnesisJson(anamnesis_json);
+          setAnamnesisMarkdown(anamnesis_markdown);
+
+          // 3. Análise de hipótese diagnóstica (em paralelo)
+          const analysis = await aiApi.analyze(transcricao_limpa);
           setAiAnalysis(analysis);
           
           setMode('review');
         } catch (error: any) {
           toast.error("Erro no processamento da IA", { description: error.message });
-          setMode('recording'); // Revert mode on error so they can try again
+          setMode('recording');
         } finally {
-          // Cleanup tracks
           stream.getTracks().forEach(track => track.stop());
         }
       };
 
       setMediaRecorder(recorder);
-      setAudioChunks(chunks);
       recorder.start();
       setIsRecording(true);
     } catch (err) {
@@ -125,6 +134,50 @@ export function Consultation({ patient, onBack }: ConsultationProps) {
     }
   };
 
+  const handleSave = async () => {
+    try {
+      const diagnosisString = aiAnalysis
+        ? `${aiAnalysis.hypothesis} (CID-10: ${aiAnalysis.cid10})`
+        : anamnesisJson?.hipotese_diagnostica?.descricao ?? 'Aguardando diagnóstico';
+
+      const consultation = await consultationsApi.create({
+        patientId: patient.id,
+        transcript: rawTranscript ? [rawTranscript] : [],
+        transcriptClean,
+        anamnesisJson,
+        anamnesisMarkdown,
+        notes: anamnesisMarkdown,
+        diagnosis: diagnosisString,
+      } as any);
+
+      setSavedConsultationId(consultation.id);
+      toast.success('Consulta salva! Agora você pode assinar digitalmente.', {
+        description: 'Vinculada ao paciente ' + patient.name,
+      });
+    } catch (err: any) {
+      toast.error(err.message ?? 'Erro ao salvar consulta');
+    }
+  };
+
+  const handleSign = async () => {
+    if (!savedConsultationId) {
+      toast.error('Salve a consulta antes de assinar.');
+      return;
+    }
+    try {
+      setIsSigning(true);
+      await consultationsApi.sign(savedConsultationId);
+      toast.success('✅ Consulta assinada digitalmente e finalizada!', {
+        description: 'Prontuário salvo com status COMPLETED.',
+      });
+      onBack();
+    } catch (err: any) {
+      toast.error(err.message ?? 'Erro ao assinar consulta');
+    } finally {
+      setIsSigning(false);
+    }
+  };
+
   return (
     <div className="h-full flex flex-col bg-white">
       {/* Top Bar */}
@@ -138,7 +191,6 @@ export function Consultation({ patient, onBack }: ConsultationProps) {
             <div
               style={{ backgroundColor: 'var(--color-primary-surface)', color: 'var(--color-primary)' }}
               className="w-8 h-8 rounded-full border border-border flex items-center justify-center font-bold text-xs shrink-0"
-              title={currentPatientName}
             >
               {currentPatientName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
             </div>
@@ -153,36 +205,28 @@ export function Consultation({ patient, onBack }: ConsultationProps) {
           <Badge variant="outline" className="font-mono text-xs font-normal text-muted-foreground border-border">
             {new Date().toLocaleDateString()} • {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Badge>
-        {mode === 'review' && (
-            <Button
-              size="sm"
-              className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
-              onClick={async () => {
-                try {
-                  const diagnosisString = aiAnalysis 
-                    ? `${aiAnalysis.hypothesis} (CID-10: ${aiAnalysis.cid10})` 
-                    : 'Aguardando diagnóstico automático';
-                    
-                  // Combine AI evidence with reported issues
-                  const issuesText = patient.reportedIssues ? `Problemas Relatados: ${patient.reportedIssues}\n\n` : '';
-                  const aiEvidences = aiAnalysis?.evidence_list?.join('; ') || 'Nenhuma listada.';
-                  const finalNotes = `${issuesText}Consulta gerada pelo MedAssist AI.\nEvidências: ${aiEvidences}`;
-
-                  await consultationsApi.create({
-                    patientId: patient.id,
-                    transcript,
-                    notes: finalNotes,
-                    diagnosis: diagnosisString,
-                  });
-                  toast.success('Consulta salva no prontuário!', { description: 'Vinculada ao paciente ' + patient.name });
-                  onBack();
-                } catch (err: any) {
-                  toast.error(err.message ?? 'Erro ao salvar consulta');
-                }
-              }}
-            >
-               <Save size={16} className="mr-2" /> Salvar no Prontuário
-            </Button>
+          {mode === 'review' && (
+            <div className="flex gap-2">
+              {!savedConsultationId ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-primary text-primary hover:bg-primary/10"
+                  onClick={handleSave}
+                >
+                  <Save size={16} className="mr-2" /> Salvar Rascunho
+                </Button>
+              ) : null}
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                onClick={handleSign}
+                disabled={isSigning}
+              >
+                <CheckCircle size={16} className="mr-2" />
+                {isSigning ? 'Assinando...' : 'Assinar e Finalizar'}
+              </Button>
+            </div>
           )}
         </div>
       </header>
@@ -191,11 +235,11 @@ export function Consultation({ patient, onBack }: ConsultationProps) {
       <div className="flex-1 overflow-hidden relative">
         <AnimatePresence mode="wait">
           {mode === 'recording' && (
-            <RecordingView 
+            <RecordingView
               key="recording"
-              isRecording={isRecording} 
+              isRecording={isRecording}
               recordingTime={recordingTime}
-              transcript={transcript}
+              rawTranscript={rawTranscript}
               onStart={handleStartRecording}
               onPause={handlePauseRecording}
               onStop={handleStopRecording}
@@ -205,13 +249,16 @@ export function Consultation({ patient, onBack }: ConsultationProps) {
             <ProcessingView key="processing" />
           )}
           {mode === 'review' && (
-            <ReviewView 
-               key="review" 
-               transcript={transcript} 
-               patient={{...patient, name: currentPatientName}} 
-               aiAnalysis={aiAnalysis} 
-               pharmacistInsights={pharmacistInsights} 
-               isPharmacistLoading={isPharmacistLoading} 
+            <ReviewView
+               key="review"
+               rawTranscript={rawTranscript}
+               transcriptClean={transcriptClean}
+               anamnesisMarkdown={anamnesisMarkdown}
+               anamnesisJson={anamnesisJson}
+               patient={{ ...patient, name: currentPatientName }}
+               aiAnalysis={aiAnalysis}
+               pharmacistInsights={pharmacistInsights}
+               isPharmacistLoading={isPharmacistLoading}
             />
           )}
         </AnimatePresence>
@@ -220,7 +267,9 @@ export function Consultation({ patient, onBack }: ConsultationProps) {
   );
 }
 
-function RecordingView({ isRecording, recordingTime, transcript, onStart, onPause, onStop }: any) {
+// ─── Recording View ───────────────────────────────────────────────────────────
+
+function RecordingView({ isRecording, recordingTime, rawTranscript, onStart, onPause, onStop }: any) {
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -228,9 +277,9 @@ function RecordingView({ isRecording, recordingTime, transcript, onStart, onPaus
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }} 
-      animate={{ opacity: 1 }} 
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="h-full flex flex-col items-center justify-center bg-background"
     >
@@ -240,7 +289,7 @@ function RecordingView({ isRecording, recordingTime, transcript, onStart, onPaus
              {isRecording ? "Ouvindo..." : "Pronto para gravar"}
            </h2>
            <p className="text-muted-foreground">
-             O MedAssist está pronto para transcrever e analisar a consulta.
+             MedAssist irá transcrever e estruturar a anamnese automaticamente.
            </p>
         </div>
 
@@ -257,18 +306,18 @@ function RecordingView({ isRecording, recordingTime, transcript, onStart, onPaus
             ))
           ) : (
             <div className="h-1 w-full max-w-md bg-muted rounded-full overflow-hidden relative">
-               {transcript.length > 0 && <div className="absolute left-0 top-0 bottom-0 bg-primary w-1/3" />}
+               {rawTranscript && <div className="absolute left-0 top-0 bottom-0 bg-primary w-1/3" />}
             </div>
           )}
         </div>
 
         {/* Transcript Preview */}
         <div className="bg-card p-6 rounded-2xl shadow-sm border border-border min-h-[200px] max-h-[300px] overflow-y-auto">
-           {transcript.length === 0 ? (
-             <p className="text-muted-foreground italic text-center mt-8">A transcrição aparecerá aqui em tempo real...</p>
+           {!rawTranscript ? (
+             <p className="text-muted-foreground italic text-center mt-8">A transcrição aparecerá aqui...</p>
            ) : (
              <p className="text-foreground leading-relaxed whitespace-pre-line">
-               {transcript.join(" ")}
+               {rawTranscript}
                <span className="animate-pulse inline-block w-2 h-4 bg-primary ml-1 align-middle"></span>
              </p>
            )}
@@ -292,7 +341,7 @@ function RecordingView({ isRecording, recordingTime, transcript, onStart, onPaus
              </Button>
            )}
            
-           {(transcript.length > 0 || recordingTime > 0) && (
+           {(rawTranscript || recordingTime > 0) && (
              <Button size="lg" variant="destructive" onClick={onStop} className="h-16 w-16 rounded-full shadow-lg">
                <Square size={24} fill="currentColor" />
              </Button>
@@ -306,50 +355,37 @@ function RecordingView({ isRecording, recordingTime, transcript, onStart, onPaus
   );
 }
 
+// ─── Processing View ──────────────────────────────────────────────────────────
+
 function ProcessingView() {
   return (
-    <motion.div 
-      initial={{ opacity: 0 }} 
-      animate={{ opacity: 1 }} 
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="h-full flex flex-col items-center justify-center bg-background text-foreground relative overflow-hidden"
     >
-      {/* Background Effects */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-primary/10 via-background to-background" />
       
       <div className="z-10 flex flex-col items-center">
-        <motion.div 
+        <motion.div
           animate={{ rotate: 360 }}
           transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-          className="w-32 h-32 border-t-2 border-l-2 border-primary/50 rounded-full mb-8 relative flex items-center justify-center shadow-[0_0_30px_rgba(0,128,128,0.2)] dark:shadow-[0_0_30px_rgba(0,255,255,0.1)]"
+          className="w-32 h-32 border-t-2 border-l-2 border-primary/50 rounded-full mb-8 relative flex items-center justify-center shadow-[0_0_30px_rgba(0,128,128,0.2)]"
         >
            <div className="w-24 h-24 border-r-2 border-b-2 border-primary rounded-full opacity-60" />
         </motion.div>
         
-        <h2 className="text-2xl font-bold mb-2 text-primary">
-          Analisando Dados Clínicos
-        </h2>
+        <h2 className="text-2xl font-bold mb-4 text-primary">Gerando Anamnese</h2>
         <div className="flex flex-col items-center space-y-2 text-sm text-muted-foreground font-mono">
-          <motion.span 
-            initial={{ opacity: 0, y: 10 }} 
-            animate={{ opacity: 1, y: 0 }} 
-            transition={{ delay: 0.5 }}
-          >
-            [1/3] Transcrevendo áudio...
+          <motion.span initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
+            [1/3] Transcrevendo e limpando o áudio...
           </motion.span>
-          <motion.span 
-            initial={{ opacity: 0, y: 10 }} 
-            animate={{ opacity: 1, y: 0 }} 
-            transition={{ delay: 1.5 }}
-          >
-            [2/3] Buscando códigos CID-10...
+          <motion.span initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2 }}>
+            [2/3] Estruturando anamnese em JSON (CFM 2.056/2013)...
           </motion.span>
-          <motion.span 
-            initial={{ opacity: 0, y: 10 }} 
-            animate={{ opacity: 1, y: 0 }} 
-            transition={{ delay: 2.5 }}
-          >
-            [3/3] Gerando plano de tratamento...
+          <motion.span initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 4 }}>
+            [3/3] Formatando prontuário para revisão...
           </motion.span>
         </div>
       </div>
@@ -357,276 +393,256 @@ function ProcessingView() {
   );
 }
 
-function ReviewView({ transcript, patient, aiAnalysis, pharmacistInsights, isPharmacistLoading }: { transcript: string[], patient: Patient, aiAnalysis: any, pharmacistInsights: any, isPharmacistLoading: boolean }) {
+// ─── Review View ──────────────────────────────────────────────────────────────
+
+function ReviewView({
+  rawTranscript,
+  transcriptClean,
+  anamnesisMarkdown,
+  anamnesisJson,
+  patient,
+  aiAnalysis,
+  pharmacistInsights,
+  isPharmacistLoading,
+}: any) {
   const [selectedExams, setSelectedExams] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState("analysis");
-
-  const handleGeneratePDF = (type: string) => {
-    if (type === "Pedido de Exames") {
-      if (selectedExams.length === 0) {
-         toast.error("Selecione pelo menos um exame para gerar o pedido.");
-         return;
-      }
-      const doc = new jsPDF();
-      doc.setFontSize(20);
-      doc.text("Guia de Solicitação de Exames", 20, 20);
-      
-      doc.setFontSize(12);
-      doc.text(`Paciente: ${patient.name}`, 20, 35);
-      doc.text(`Data Nascimento: ${patient.dob ? new Date(patient.dob).toLocaleDateString() : 'Não informada'}`, 20, 45);
-      doc.text(`Data da Consulta: ${new Date().toLocaleDateString()}`, 20, 55);
-      
-      doc.setFontSize(14);
-      doc.text("Exames Solicitados:", 20, 75);
-      
-      doc.setFontSize(12);
-      let y = 85;
-      selectedExams.forEach(ex => {
-        doc.text(`• ${ex}`, 25, y);
-        y += 10;
-      });
-
-      doc.text("________________________________________________", 20, y + 20);
-      doc.text("Assinatura do Médico", 20, y + 30);
-
-      doc.save(`Pedido_Exames_${patient.name.replace(/\s+/g, '_')}.pdf`);
-      toast.success("PDF de Exames gerado com sucesso!");
-      return;
-    }
-
-    toast.success(`Gerando PDF do ${type}...`, {
-      description: "O documento foi baixado com sucesso."
-    });
-  };
-
-  const handleWhatsApp = () => {
-    toast.success("Abrindo WhatsApp...", {
-      description: "Documentos anexados e prontos para envio."
-    });
-    window.open('https://wa.me/', '_blank');
-  };
+  const [activeTab, setActiveTab] = useState("anamnese");
 
   const safeAnalysis = aiAnalysis || {
-    hypothesis: 'Analisando...',
-    cid10: '...',
+    hypothesis: 'Aguardando análise...',
+    cid10: '—',
     confidence: '0%',
-    differential: '...',
-    differential_cid: '...',
-    evidence_list: []
+    differential: '—',
+    differential_cid: '—',
+    evidence_list: [],
+  };
+
+  const pendingFields: string[] = anamnesisJson?.campos_nao_identificados ?? [];
+
+  const handleGeneratePDF = () => {
+    if (selectedExams.length === 0) {
+      toast.error("Selecione pelo menos um exame para gerar o pedido.");
+      return;
+    }
+    const doc = new jsPDF();
+    doc.setFontSize(20);
+    doc.text("Guia de Solicitação de Exames", 20, 20);
+    doc.setFontSize(12);
+    doc.text(`Paciente: ${patient.name}`, 20, 35);
+    doc.text(`Data da Consulta: ${new Date().toLocaleDateString()}`, 20, 45);
+    doc.setFontSize(14);
+    doc.text("Exames Solicitados:", 20, 65);
+    doc.setFontSize(12);
+    let y = 75;
+    selectedExams.forEach(ex => {
+      doc.text(`• ${ex}`, 25, y);
+      y += 10;
+    });
+    doc.text("________________________________________________", 20, y + 20);
+    doc.text("Assinatura do Médico", 20, y + 30);
+    doc.save(`Pedido_Exames_${patient.name.replace(/\s+/g, '_')}.pdf`);
+    toast.success("PDF de Exames gerado com sucesso!");
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }} 
-      animate={{ opacity: 1, y: 0 }} 
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
       className="h-full flex flex-col bg-background overflow-hidden"
     >
-      {/* Mobile Tabs Header */}
-      <div className="lg:hidden bg-card border-b border-border p-2 shrink-0 z-20">
-         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-           <TabsList className="grid w-full grid-cols-2">
-             <TabsTrigger value="transcript">Transcrição</TabsTrigger>
-             <TabsTrigger value="analysis">Análise & Conduta</TabsTrigger>
-           </TabsList>
-         </Tabs>
-      </div>
-
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Left Panel: Transcript */}
-        <div className={cn(
-          "w-full lg:w-1/3 flex-col border-r border-border bg-card min-w-0 lg:flex",
-          activeTab === 'transcript' ? "flex" : "hidden"
-        )}>
+        <div className="w-full lg:w-1/3 flex flex-col border-r border-border bg-card min-w-0">
           <div className="p-4 border-b border-border bg-muted/30 flex justify-between items-center shrink-0">
             <h3 className="font-semibold text-foreground flex items-center">
-              <FileText size={18} className="mr-2 text-primary" /> 
-              Transcrição da Consulta
+              <FileText size={18} className="mr-2 text-primary" />
+              Transcrição Original
             </h3>
           </div>
-          <ScrollArea className="flex-1 p-4 lg:p-6">
-            <div className="prose prose-slate dark:prose-invert max-w-none pb-20 lg:pb-0">
-              {transcript.map((line, i) => (
-                <p key={i} className="mb-3 text-foreground leading-relaxed p-2 rounded hover:bg-muted/50 transition-colors">{line}</p>
-              ))}
-            </div>
+          <ScrollArea className="flex-1 p-4">
+            <p className="text-foreground leading-relaxed whitespace-pre-line text-sm">
+              {rawTranscript || <span className="text-muted-foreground italic">Sem transcrição disponível.</span>}
+            </p>
           </ScrollArea>
         </div>
 
-        {/* Middle/Right Panel: AI Analysis & Actions */}
-        <div className={cn(
-          "flex-1 flex-col bg-background h-full overflow-hidden lg:flex",
-          activeTab === 'analysis' ? "flex" : "hidden"
-        )}>
-           <div className="flex-1 overflow-y-auto p-4 lg:p-6">
-             <div className="space-y-6 max-w-4xl mx-auto">
-               
-               {/* AlertBanner 
-                 type="warning" 
-                 title="Atenção Crítica" 
-                 message="Mensagem de aviso aqui"
-                 className="mb-4"
-               /> */}
+        {/* Right Panel: Anamnese Tabs */}
+        <div className="flex-1 flex flex-col bg-background h-full overflow-hidden">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
+            <div className="bg-card border-b border-border px-4 pt-3 shrink-0">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="anamnese" className="gap-2">
+                  <ClipboardList size={14} /> Anamnese
+                </TabsTrigger>
+                <TabsTrigger value="analise" className="gap-2">
+                  <BrainCircuit size={14} /> Análise IA
+                </TabsTrigger>
+                <TabsTrigger value="exames" className="gap-2">
+                  <FileText size={14} /> Exames
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
-               {/* AI Insights Card */}
-               <Card className="border-l-4 border-l-primary shadow-md overflow-hidden bg-card">
-                 <CardHeader className="pb-2 bg-primary/5">
-                   <div className="flex items-center gap-2 mb-1">
-                     <Badge variant="outline" className="bg-primary hover:bg-primary text-primary-foreground border-none">Analysis AI Dashboard</Badge>
-                     <span className="text-xs text-muted-foreground font-mono">Baseado em Evidências • Atualizado agora</span>
-                   </div>
-                   <CardTitle className="text-xl font-bold text-foreground">Diagnóstico Sugerido</CardTitle>
-                 </CardHeader>
-                 <CardContent className="pt-4 space-y-4">
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="p-4 bg-muted/30 rounded-xl border border-border">
-                        <h4 className="font-semibold text-foreground mb-1">Hipótese Principal</h4>
-                        <p className="text-lg font-bold text-primary">{safeAnalysis.hypothesis}</p>
-                        <p className="text-sm text-muted-foreground mt-1">CID-10: <span className="font-mono font-medium text-foreground">{safeAnalysis.cid10}</span></p>
-                        <div className="mt-3 flex items-center gap-2">
-                          <div className="h-2 w-full bg-border rounded-full overflow-hidden">
-                            <div className="h-full bg-status-success" style={{width: safeAnalysis.confidence.includes('%') ? safeAnalysis.confidence : '100%'}}></div>
-                          </div>
-                          <span className="text-xs font-bold font-mono text-status-success">{safeAnalysis.confidence}</span>
-                        </div>
-                      </div>
-                      <div className="p-4 bg-muted/30 rounded-xl border border-border">
-                        <h4 className="font-semibold text-foreground mb-1">Diagnóstico Diferencial</h4>
-                        <p className="text-lg font-bold text-foreground">{safeAnalysis.differential}</p>
-                        <p className="text-sm text-muted-foreground mt-1">CID-10: <span className="font-mono font-medium text-foreground">{safeAnalysis.differential_cid}</span></p>
-                      </div>
-                   </div>
+            {/* Aba Anamnese: Prontuário em Markdown */}
+            <TabsContent value="anamnese" className="flex-1 overflow-y-auto m-0">
+              <div className="p-4 lg:p-6 max-w-4xl mx-auto">
+                {pendingFields.length > 0 && (
+                  <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
+                    <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-300 mb-1">⚠️ {pendingFields.length} campo(s) não abordado(s) na consulta:</p>
+                    <ul className="list-disc pl-5 space-y-0.5">
+                      {pendingFields.map((f: string, i: number) => (
+                        <li key={i} className="text-xs text-yellow-700 dark:text-yellow-400">{f}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {anamnesisMarkdown ? (
+                  <div className="prose prose-slate dark:prose-invert max-w-none text-sm">
+                    <ReactMarkdown>{anamnesisMarkdown}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground italic">Anamnese não disponível.</p>
+                )}
+              </div>
+            </TabsContent>
 
-                   {/* Pharmacist Insights */}
-                   {pharmacistInsights && (
-                      <div className="mt-4 p-4 bg-orange-50/50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800 rounded-xl space-y-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Badge variant="outline" className="bg-orange-500 text-white border-none">Análise Farmacêutica</Badge>
-                          <span className="text-xs text-orange-600 dark:text-orange-400 font-mono">Possíveis causas e tratamentos sugeridos</span>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                           <div>
-                             <h4 className="font-semibold text-foreground text-sm mb-2 text-orange-700 dark:text-orange-300">Causas Identificadas</h4>
-                             <ul className="list-disc pl-5 space-y-1">
-                               {pharmacistInsights.causes?.map((cause: string, i: number) => (
-                                 <li key={i} className="text-sm text-muted-foreground">{cause}</li>
-                               ))}
-                             </ul>
+            {/* Aba Análise IA: Hipótese + Farmacêutico */}
+            <TabsContent value="analise" className="flex-1 overflow-y-auto m-0">
+              <div className="p-4 lg:p-6 space-y-4 max-w-4xl mx-auto">
+                <Card className="border-l-4 border-l-primary shadow-md overflow-hidden bg-card">
+                  <CardHeader className="pb-2 bg-primary/5">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge variant="outline" className="bg-primary hover:bg-primary text-primary-foreground border-none">Hipótese Diagnóstica</Badge>
+                    </div>
+                    <CardTitle className="text-xl font-bold text-foreground">Diagnóstico Sugerido</CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-4 space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                       <div className="p-4 bg-muted/30 rounded-xl border border-border">
+                         <h4 className="font-semibold text-foreground mb-1">Hipótese Principal</h4>
+                         <p className="text-lg font-bold text-primary">{safeAnalysis.hypothesis}</p>
+                         <p className="text-sm text-muted-foreground mt-1">CID-10: <span className="font-mono font-medium text-foreground">{safeAnalysis.cid10}</span></p>
+                         <div className="mt-3 flex items-center gap-2">
+                           <div className="h-2 w-full bg-border rounded-full overflow-hidden">
+                             <div className="h-full bg-emerald-500" style={{ width: safeAnalysis.confidence?.includes('%') ? safeAnalysis.confidence : '0%' }}></div>
                            </div>
-                           <div>
-                             <h4 className="font-semibold text-foreground text-sm mb-2 text-emerald-700 dark:text-emerald-300">Medicamentos Sugeridos</h4>
-                             <ul className="list-disc pl-5 space-y-1">
-                               {pharmacistInsights.medications?.map((med: string, i: number) => (
-                                 <li key={i} className="text-sm text-muted-foreground">{med}</li>
-                               ))}
-                             </ul>
+                           <span className="text-xs font-bold font-mono text-emerald-600">{safeAnalysis.confidence}</span>
+                         </div>
+                       </div>
+                       <div className="p-4 bg-muted/30 rounded-xl border border-border">
+                         <h4 className="font-semibold text-foreground mb-1">Diagnóstico Diferencial</h4>
+                         <p className="text-lg font-bold text-foreground">{safeAnalysis.differential}</p>
+                         <p className="text-sm text-muted-foreground mt-1">CID-10: <span className="font-mono font-medium text-foreground">{safeAnalysis.differential_cid}</span></p>
+                       </div>
+                    </div>
+
+                    {pharmacistInsights && (
+                       <div className="mt-4 p-4 bg-orange-50/50 dark:bg-orange-900/10 border border-orange-200 rounded-xl space-y-4">
+                         <Badge variant="outline" className="bg-orange-500 text-white border-none">Análise Farmacêutica</Badge>
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <h4 className="font-semibold text-sm mb-2 text-orange-700">Causas Identificadas</h4>
+                              <ul className="list-disc pl-5 space-y-1">
+                                {pharmacistInsights.causes?.map((c: string, i: number) => <li key={i} className="text-sm text-muted-foreground">{c}</li>)}
+                              </ul>
+                            </div>
+                            <div>
+                              <h4 className="font-semibold text-sm mb-2 text-emerald-700">Medicamentos Sugeridos</h4>
+                              <ul className="list-disc pl-5 space-y-1">
+                                {pharmacistInsights.medications?.map((m: string, i: number) => <li key={i} className="text-sm text-muted-foreground">{m}</li>)}
+                              </ul>
+                            </div>
+                         </div>
+                       </div>
+                    )}
+
+                    <Accordion type="single" collapsible className="w-full border border-border rounded-lg bg-card px-4">
+                       <AccordionItem value="evidence" className="border-none">
+                         <AccordionTrigger className="text-sm font-medium text-foreground hover:no-underline">
+                            Ver Evidências Extraídas
+                         </AccordionTrigger>
+                         <AccordionContent>
+                           <div className="space-y-2 pt-2 text-sm text-muted-foreground">
+                              {safeAnalysis.evidence_list?.map((ev: string, idx: number) => (
+                                <p key={idx}>• {ev}</p>
+                              ))}
                            </div>
-                        </div>
+                         </AccordionContent>
+                       </AccordionItem>
+                    </Accordion>
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+
+            {/* Aba Exames */}
+            <TabsContent value="exames" className="flex-1 overflow-y-auto m-0">
+              <div className="p-4 lg:p-6 max-w-4xl mx-auto space-y-4">
+                <Card className="shadow-sm bg-card">
+                  <CardHeader>
+                    <CardTitle className="text-lg font-semibold">Solicitação de Exames</CardTitle>
+                    <CardDescription>Selecione os exames recomendados pela IA para gerar o pedido em PDF</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {isPharmacistLoading ? (
+                         <p className="text-sm text-muted-foreground animate-pulse">Consultando especialista de diagnósticos...</p>
+                      ) : pharmacistInsights?.exams?.length > 0 ? (
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                           {pharmacistInsights.exams.map((exam: string, idx: number) => (
+                              <label key={idx} className="flex items-center space-x-3 p-3 border border-border rounded-lg hover:bg-muted/30 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  className="w-5 h-5 rounded text-primary border-border focus:ring-primary"
+                                  checked={selectedExams.includes(exam)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) setSelectedExams([...selectedExams, exam]);
+                                    else setSelectedExams(selectedExams.filter(ex => ex !== exam));
+                                  }}
+                                />
+                                <span className="text-sm font-medium text-foreground">{exam}</span>
+                              </label>
+                           ))}
+                         </div>
+                      ) : (
+                         <p className="text-sm text-muted-foreground">Nenhuma sugestão automática de exames.</p>
+                      )}
+                      
+                      <div className="flex justify-end pt-4">
+                        <Button
+                          onClick={handleGeneratePDF}
+                          disabled={selectedExams.length === 0}
+                          className="w-full md:w-auto bg-primary text-primary-foreground hover:bg-primary/90"
+                        >
+                          <FileText size={18} className="mr-2" />
+                          Gerar Guia em PDF ({selectedExams.length})
+                        </Button>
                       </div>
-                   )}
+                    </div>
+                  </CardContent>
+                </Card>
 
-                   <Accordion type="single" collapsible className="w-full border border-border rounded-lg bg-card px-4">
-                      <AccordionItem value="evidence" className="border-none">
-                        <AccordionTrigger className="text-sm font-medium text-foreground hover:no-underline">
-                           Ver Evidências Científicas Extraídas
-                        </AccordionTrigger>
-                        <AccordionContent>
-                          <div className="space-y-2 pt-2 text-sm text-muted-foreground prose prose-slate dark:prose-invert">
-                             {safeAnalysis.evidence_list.map((ev: string, idx: number) => (
-                               <p key={idx}>• {ev}</p>
-                             ))}
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
-                   </Accordion>
-                 </CardContent>
-               </Card>
-
-               {/* Exam Request Section */}
-               <Card className="shadow-sm bg-card">
-                 <CardHeader>
-                   <CardTitle className="text-lg font-semibold text-foreground">Solicitação de Exames</CardTitle>
-                   <CardDescription>Selecione os exames recomendados pela IA para este perfil clínico</CardDescription>
-                 </CardHeader>
-                 <CardContent>
-                   <div className="space-y-4">
-                     {isPharmacistLoading ? (
-                        <p className="text-sm text-muted-foreground animate-pulse">Consultando especialista de diagnósticos...</p>
-                     ) : pharmacistInsights?.exams && pharmacistInsights.exams.length > 0 ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {pharmacistInsights.exams.map((exam: string, idx: number) => (
-                             <label key={idx} className="flex items-center space-x-3 p-3 border border-border rounded-lg hover:bg-muted/30 cursor-pointer">
-                               <input 
-                                 type="checkbox" 
-                                 className="w-5 h-5 rounded text-primary border-border focus:ring-primary"
-                                 checked={selectedExams.includes(exam)}
-                                 onChange={(e) => {
-                                   if (e.target.checked) setSelectedExams([...selectedExams, exam]);
-                                   else setSelectedExams(selectedExams.filter(e => e !== exam));
-                                 }}
-                               />
-                               <span className="text-sm font-medium text-foreground">{exam}</span>
-                             </label>
-                          ))}
-                        </div>
-                     ) : (
-                        <p className="text-sm text-muted-foreground">Nenhuma sugestão automatica de exames.</p>
-                     )}
-                     
-                     <div className="flex justify-end pt-4">
-                       <Button 
-                         onClick={() => handleGeneratePDF("Pedido de Exames")}
-                         disabled={selectedExams.length === 0}
-                         className="w-full md:w-auto bg-primary text-primary-foreground hover:bg-primary/90"
-                       >
-                         <FileText size={18} className="mr-2" />
-                         Gerar Guia em PDF ({selectedExams.length})
-                       </Button>
-                     </div>
-                   </div>
-                 </CardContent>
-               </Card>
-
-               {/* Certificate Section */}
-               <Card className="shadow-sm bg-card">
-                 <CardHeader>
-                   <CardTitle className="text-lg font-semibold text-foreground">Atestado Médico</CardTitle>
-                   <CardDescription>Gerar atestado de comparecimento ou afastamento</CardDescription>
-                 </CardHeader>
-                 <CardContent>
-                   <div className="flex flex-col sm:flex-row gap-3">
-                     <Button variant="outline" className="flex-1 w-full" onClick={() => handleGeneratePDF("Atestado de Horas")}>
-                       Atestado de Horas (Comparecimento)
-                     </Button>
-                     <Button variant="outline" className="flex-1 w-full" onClick={() => handleGeneratePDF("Atestado de 1 Dia")}>
-                       Atestado de 1 Dia (Afastamento)
-                     </Button>
-                   </div>
-                 </CardContent>
-               </Card>
-
-             </div>
-           </div>
-
-           {/* Footer Actions */}
-           <div className="shrink-0 bg-card border-t border-border p-4 shadow-lg z-20">
-             <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-               <div className="text-sm text-muted-foreground order-2 md:order-1 text-center md:text-left">
-                 <span className="font-semibold text-foreground">Dr. Ray</span> • CRM 123456-SP
-               </div>
-               <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto order-1 md:order-2">
-                  <Button variant="outline" className="w-full sm:w-auto text-foreground border-border" onClick={() => handleGeneratePDF("Relatório Completo")}>
-                    <Download size={18} className="mr-2" /> Baixar Tudo (PDF)
-                  </Button>
-                  <Button className="w-full sm:w-auto bg-[#25D366] hover:bg-[#128C7E] text-white border-none" onClick={handleWhatsApp}>
-                    <Send size={18} className="mr-2" /> Enviar via WhatsApp
-                  </Button>
-               </div>
-             </div>
-           </div>
+                <Card className="shadow-sm bg-card">
+                  <CardHeader>
+                    <CardTitle className="text-lg font-semibold">Atestado Médico</CardTitle>
+                    <CardDescription>Gerar atestado de comparecimento ou afastamento</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <Button variant="outline" className="flex-1 w-full" onClick={() => toast.info("Função em breve")}>
+                        Atestado de Horas (Comparecimento)
+                      </Button>
+                      <Button variant="outline" className="flex-1 w-full" onClick={() => toast.info("Função em breve")}>
+                        Atestado de 1 Dia (Afastamento)
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </motion.div>
   );
 }
-
