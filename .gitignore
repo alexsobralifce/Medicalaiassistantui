@@ -1,0 +1,83 @@
+# =============================================
+# MedAssist AI — .gitignore
+# React/Vite Frontend + Node.js/Express Backend
+# =============================================
+
+# ─── Environment & Secrets ───────────────────
+.env
+.env.local
+.env.*.local
+.env.production
+server/.env
+
+# ─── Dependencies ────────────────────────────
+node_modules/
+server/node_modules/
+
+# ─── Build Outputs ───────────────────────────
+dist/
+build/
+server/dist/
+
+# ─── Vite Cache ──────────────────────────────
+.vite/
+vite-ssg-temp/
+
+# ─── TypeScript ──────────────────────────────
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# ─── Prisma ──────────────────────────────────
+# Keep schema.prisma and migrations, but ignore generated client and SQLite local files
+server/node_modules/.prisma/
+server/prisma/*.db
+server/prisma/*.db-journal
+server/prisma/dev.db
+server/prisma/*.db-shm
+server/prisma/*.db-wal
+
+# ─── Uploads (Audio files) ───────────────────
+uploads/
+server/uploads/
+*.webm
+*.mp3
+*.wav
+*.ogg
+*.m4a
+
+# ─── Logs ────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─── OS Files ────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# ─── IDE / Editor ────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*.suo
+*.user
+*.workspace
+
+# ─── Testing ─────────────────────────────────
+coverage/
+.nyc_output/
+
+# ─── Misc ────────────────────────────────────
+.cache/
+.turbo/
+.parcel-cache/
+*.local
