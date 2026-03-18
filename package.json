@@ -66,6 +66,7 @@
     "jsdom": "^28.1.0",
     "tailwindcss": "^4.2.1",
     "vite": "^6.4.1",
+    "vite-plugin-pwa": "^1.2.0",
     "vitest": "^4.1.0"
   },
   "scripts": {

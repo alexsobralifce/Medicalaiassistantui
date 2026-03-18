@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { Loader2 } from "lucide-react";
 import { Login } from "./components/screens/Login";
 import { Dashboard } from "./components/screens/Dashboard";
 import { Consultation } from "./components/screens/Consultation";
@@ -32,6 +33,47 @@ export default function App() {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
+
+  // 1. Restaurar Sessão e Estado de Navegação no Mount
+  useEffect(() => {
+    const restoreSession = async () => {
+      const token = localStorage.getItem('medassist_token');
+      if (token) {
+        try {
+          const user = await authApi.me();
+          setCurrentUser(user);
+          
+          // Recuperar estado de navegação salvo
+          const savedState = localStorage.getItem('medassist_app_state');
+          if (savedState) {
+            const { screen, patient } = JSON.parse(savedState);
+            setCurrentScreen(screen || "dashboard");
+            setSelectedPatient(patient || null);
+          } else {
+            setCurrentScreen("dashboard");
+          }
+        } catch (err) {
+          console.error("Sessão inválida", err);
+          localStorage.removeItem('medassist_token');
+          localStorage.removeItem('medassist_app_state');
+          setCurrentScreen("login");
+        }
+      }
+      setIsRestoringSession(false);
+    };
+    restoreSession();
+  }, []);
+
+  // 2. Persistir Estado de Navegação sempre que mudar (desde que logado)
+  useEffect(() => {
+    if (currentUser && currentScreen !== "login") {
+      localStorage.setItem('medassist_app_state', JSON.stringify({
+        screen: currentScreen,
+        patient: selectedPatient
+      }));
+    }
+  }, [currentScreen, selectedPatient, currentUser]);
 
   const handleLogin = async (email: string, pass: string) => {
     setIsLoggingIn(true);
@@ -60,10 +102,20 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('medassist_token');
+    localStorage.removeItem('medassist_app_state');
     setCurrentUser(null);
     setSelectedPatient(null);
     setCurrentScreen("login");
   };
+
+  if (isRestoringSession) {
+    return (
+      <div className="h-screen w-full bg-background flex flex-col items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary mb-4" />
+        <p className="text-muted-foreground text-sm font-medium animate-pulse">Restaurando sessão...</p>
+      </div>
+    );
+  }
 
   if (currentScreen === "login" || !currentUser) {
     return (

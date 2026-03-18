@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Fundo Azul Médico -->
+  <rect width="512" height="512" rx="100" fill="#0d9488" />
+  
+  <!-- Cruz Médica Branca -->
+  <path d="M216 120h80v96h96v80h-96v96h-80v-96h-96v-80h96v-96z" fill="#ffffff" />
+  
+  <!-- Estetoscópio ou detalhes abstratos de IA -->
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#ffffff" stroke-width="24" stroke-dasharray="60 40" opacity="0.4" />
+</svg>

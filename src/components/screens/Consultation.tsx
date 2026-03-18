@@ -43,6 +43,51 @@ export function Consultation({ patient, onBack }: ConsultationProps) {
   const [isPharmacistLoading, setIsPharmacistLoading] = useState(false);
   const [isSigning, setIsSigning] = useState(false);
   const [savedConsultationId, setSavedConsultationId] = useState<string | null>(null);
+  
+  // Controle de carregamento do rascunho
+  const [isDraftLoaded, setIsDraftLoaded] = useState(false);
+
+  // 1. Carregar rascunho salvo, se existir
+  useEffect(() => {
+    const draftStr = localStorage.getItem(`medassist_draft_${patient.id}`);
+    if (draftStr) {
+      try {
+        const draft = JSON.parse(draftStr);
+        if (draft.mode) setMode(draft.mode);
+        if (draft.rawTranscript) setRawTranscript(draft.rawTranscript);
+        if (draft.transcriptClean) setTranscriptClean(draft.transcriptClean);
+        if (draft.anamnesisJson) setAnamnesisJson(draft.anamnesisJson);
+        if (draft.anamnesisMarkdown) setAnamnesisMarkdown(draft.anamnesisMarkdown);
+        if (draft.aiAnalysis) setAiAnalysis(draft.aiAnalysis);
+        if (draft.pharmacistInsights) setPharmacistInsights(draft.pharmacistInsights);
+        if (draft.savedConsultationId) setSavedConsultationId(draft.savedConsultationId);
+      } catch (err) {
+        console.error("Erro ao ler rascunho local", err);
+      }
+    }
+    setIsDraftLoaded(true);
+  }, [patient.id]);
+
+  // 2. Auto-save do rascunho em qualquer alteração
+  useEffect(() => {
+    if (!isDraftLoaded) return;
+    
+    const hasData = rawTranscript || anamnesisMarkdown || savedConsultationId || mode !== 'recording';
+    if (hasData) {
+      localStorage.setItem(`medassist_draft_${patient.id}`, JSON.stringify({
+        mode,
+        rawTranscript,
+        transcriptClean,
+        anamnesisJson,
+        anamnesisMarkdown,
+        aiAnalysis,
+        pharmacistInsights,
+        savedConsultationId
+      }));
+    } else {
+      localStorage.removeItem(`medassist_draft_${patient.id}`);
+    }
+  }, [isDraftLoaded, patient.id, mode, rawTranscript, transcriptClean, anamnesisJson, anamnesisMarkdown, aiAnalysis, pharmacistInsights, savedConsultationId]);
 
   // Auto-fetch Pharmacist Insights on mount if we have reported issues
   useEffect(() => {
@@ -168,6 +213,10 @@ export function Consultation({ patient, onBack }: ConsultationProps) {
     try {
       setIsSigning(true);
       await consultationsApi.sign(savedConsultationId);
+      
+      // Limpar rascunho da sessão local após sucesso real
+      localStorage.removeItem(`medassist_draft_${patient.id}`);
+      
       toast.success('✅ Consulta assinada digitalmente e finalizada!', {
         description: 'Prontuário salvo com status COMPLETED.',
       });
