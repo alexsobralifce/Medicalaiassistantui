@@ -4,6 +4,5 @@ build
 .git
 .gitignore
 *.log
-server
 .github
 

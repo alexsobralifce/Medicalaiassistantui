@@ -50,9 +50,17 @@ app.use('/api/v1/cids', cidsRouter);
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/users', usersRouter);
 
-// ─── 404 fallback ─────────────────────────────────────────────────────────────
-app.use((_req, res) => {
-  res.status(404).json({ error: 'Rota não encontrada' });
+// ─── Static Files & SPA Fallback ──────────────────────────────────────────────
+app.use(express.static(path.join(__dirname, '../../public')));
+
+// ─── 404 fallback para APIs ───────────────────────────────────────────────────
+app.use('/api/*', (_req, res) => {
+  res.status(404).json({ error: 'Rota da API não encontrada' });
+});
+
+// React SPA fallback para todas as outras rotas HTML
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(__dirname, '../../public/index.html'));
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────

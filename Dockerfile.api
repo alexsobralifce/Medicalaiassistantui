@@ -1,5 +1,15 @@
-# Stage 1: Build
-FROM node:20-alpine AS builder
+# Build the frontend first
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app
+COPY package*.json .npmrc ./
+RUN npm ci
+COPY . .
+# API URL must point to self since they will be served together
+ENV VITE_API_URL=/api/v1
+RUN npm run build
+
+# Stage 1: Build Backend
+FROM node:20-alpine AS backend-builder
 WORKDIR /app
 # Install OpenSSL so Prisma can detect the ssl version
 RUN apk add --no-cache openssl
@@ -25,11 +35,13 @@ COPY server/package*.json ./
 # De novo: ignorar generate automático
 ENV PRISMA_SKIP_POSTINSTALL_GENERATE="true"
 RUN npm ci --omit=dev
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/prisma ./prisma
+COPY --from=backend-builder /app/dist ./dist
+COPY --from=backend-builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=backend-builder /app/prisma ./prisma
 # Copy cids.json into dist/prisma/ so seed.js (__dirname = dist/prisma) can find it
-COPY --from=builder /app/prisma/cids.json ./dist/prisma/cids.json
+COPY --from=backend-builder /app/prisma/cids.json ./dist/prisma/cids.json
+# Copy frontend build output to be served by Express
+COPY --from=frontend-builder /app/build ./public
 EXPOSE 3001
 # Push schema directly to DB (bypasses migration history state), seed, then start server
 CMD ["sh", "-c", "./node_modules/.bin/prisma db push --accept-data-loss && npm run prisma:seed-all:prod && node dist/src/index.js"]
