@@ -107,7 +107,7 @@ Retorne EXCLUSIVAMENTE um JSON válido com a seguinte estrutura:
   "campos_nao_identificados": ["string"]
 }
 
-O campo "campos_nao_identificados" deve listar quais seções da anamnese NÃO foram abordadas na consulta, para que o médico saiba o que precisa perguntar manualmente.`;
+O campo "campos_nao_identificados" deve listar APENAS as seções ESSENCIAIS da anamnese (como Queixa Principal, História da Doença Atual ou Antecedentes Pessoais críticos) que NÃO foram abordadas na consulta. Não inclua seções secundárias (como Revisão por Sistemas ou Condições Socioeconômicas) nesta lista; deixe-as omitidas silenciosamente.`;
 
 export const PROMPT_3_MARKDOWN = `Você é um assistente de formatação de prontuários médicos no Brasil.
 
