@@ -5,12 +5,14 @@ WORKDIR /app
 RUN apk add --no-cache openssl
 # Copy server package files explicitly (context is repo root)
 COPY server/package*.json ./
+# Impede que o Prisma tente gerar o client automaticamente durante o npm ci (quebrando sem banco)
+ENV PRISMA_SKIP_POSTINSTALL_GENERATE="true"
 RUN npm ci
 # Copy the full server source including prisma/
 COPY server/ .
-# prisma generate only reads the schema (no DB needed), but the CLI
-# still validates env vars. Force a dummy URL directly in the command.
-RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" ./node_modules/.bin/prisma generate
+# Agora declaramos o URL falso como ENV para que o binário encontre
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+RUN ./node_modules/.bin/prisma generate
 RUN npm run build
 
 # Stage 2: Production
@@ -20,6 +22,8 @@ ENV NODE_ENV=production
 # Install OpenSSL for Prisma runtime
 RUN apk add --no-cache openssl
 COPY server/package*.json ./
+# De novo: ignorar generate automático
+ENV PRISMA_SKIP_POSTINSTALL_GENERATE="true"
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
