@@ -16,8 +16,11 @@ import usersRouter from './routes/users';
 const app = express();
 const PORT = process.env.PORT ?? 3001;
 
-// ─── Middlewares ──────────────────────────────────────────────────────────────
-app.use(cors({
+// ─── Static Files & SPA Fallback (Não passam pelo CORS) ────────────────────────
+app.use(express.static(path.join(__dirname, '../../public')));
+
+// ─── Middlewares para APIs ────────────────────────────────────────────────────
+app.use('/api', cors({
   origin: (origin, callback) => {
     const clientUrl = process.env.CLIENT_URL;
     const allowed = [
@@ -26,6 +29,7 @@ app.use(cors({
     ];
     if (clientUrl) allowed.push(clientUrl);
     
+    // Se não houver origin (mesma origem) ou estiver na lista de permitidos
     if (!origin || allowed.includes(origin)) {
       callback(null, true);
     } else {
@@ -42,7 +46,7 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
+// ─── Rotas API ────────────────────────────────────────────────────────────────
 app.use('/api/v1/patients', patientsRouter);
 app.use('/api/v1/consultations', consultationsRouter);
 app.use('/api/v1/ai', aiRouter);
@@ -50,17 +54,21 @@ app.use('/api/v1/cids', cidsRouter);
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/users', usersRouter);
 
-// ─── Static Files & SPA Fallback ──────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, '../../public')));
-
-// ─── 404 fallback para APIs ───────────────────────────────────────────────────
+// ─── Fallbacks ────────────────────────────────────────────────────────────────
+// Fallback para APIs rotas erradas
 app.use('/api/*', (_req, res) => {
   res.status(404).json({ error: 'Rota da API não encontrada' });
 });
 
-// React SPA fallback para todas as outras rotas HTML
+// React SPA fallback para todas as rotas (redireciona para o index.html)
 app.get('*', (_req, res) => {
-  res.sendFile(path.join(__dirname, '../../public/index.html'));
+  const publicPath = path.join(__dirname, '../../public/index.html');
+  if (require('fs').existsSync(publicPath)) {
+    res.sendFile(publicPath);
+  } else {
+    // Apenas para debug se não existir
+    res.status(500).send('Frontend build not found at ' + publicPath);
+  }
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
